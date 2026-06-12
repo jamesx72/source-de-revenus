@@ -1,0 +1,6 @@
+{
+  "name": "WiFiCash",
+  "description": "Monétisez la connexion Wi-Fi de vos établissements grâce à WiFiCash, la plateforme SaaS ultime pour cafés, hôtels et restaurants.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
