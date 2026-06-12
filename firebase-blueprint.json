@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "A support ticket submitted by a user",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string", "description": "Subject of the ticket" },
+        "message": { "type": "string", "description": "Details of the ticket" },
+        "status": { "type": "string", "enum": ["open", "closed", "in-progress"] },
+        "userId": { "type": "string", "description": "UID of the user who submitted the ticket" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["subject", "message", "status", "userId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "support_tickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "User support tickets"
+    }
+  }
+}

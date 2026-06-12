@@ -1,0 +1,43 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isSupportTicketValid(data) {
+      return data.keys().hasAll(['subject', 'message', 'status', 'userId', 'createdAt', 'updatedAt']) &&
+             data.subject is string && data.subject.size() > 0 && data.subject.size() <= 200 &&
+             data.message is string && data.message.size() > 0 && data.message.size() <= 2000 &&
+             data.status == 'open' &&
+             data.userId == request.auth.uid &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+
+    // Support Tickets Collection
+    match /support_tickets/{ticketId} {
+      allow create: if isAuthenticated() && 
+                    // Validate data types and logic
+                    isSupportTicketValid(incoming());
+                    
+      // Only allow creators to read their own tickets
+      allow read: if isOwner(resource.data.userId);
+    }
+  }
+}
