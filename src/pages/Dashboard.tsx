@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
@@ -99,6 +99,7 @@ export default function Dashboard() {
   const [smtpConfig, setSmtpConfig] = useState({ enabled: false, host: '', port: 587, username: '', password: '', fromName: 'Mon Établissement', fromEmail: 'no-reply@mon-etablissement.com' });
   const [promoBanner, setPromoBanner] = useState({ enabled: false, title: 'Happy Hour !', description: '-20% sur toutes les boissons de 18h à 20h.', type: 'info', scheduleType: 'always', startTime: '18:00', endTime: '20:00', imageUrl: '', linkUrl: '' });
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [backupRetention, setBackupRetention] = useState('30');
   const [adsRevenueTimeframe, setAdsRevenueTimeframe] = useState<'daily' | 'monthly'>('daily');
   const [overviewTimeframe, setOverviewTimeframe] = useState<'daily' | 'monthly'>('daily');
   const [analyticsTimeframe, setAnalyticsTimeframe] = useState<'daily' | 'monthly'>('monthly');
@@ -2528,6 +2529,92 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {/* Backup Settings Section */}
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-8 backdrop-blur-md shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                      <Server className="text-indigo-400" size={20} />
+                      Sauvegardes Automatiques (Firestore)
+                    </h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    {/* Storage Meter */}
+                    <div className="bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl p-6 flex flex-col gap-4">
+                      <div className="flex justify-between items-end">
+                        <div className="space-y-1">
+                          <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                            <Activity size={16} className="text-indigo-500" />
+                            Quota de Stockage utilisé
+                          </h4>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Espace occupé par les archives de logs de connexion.
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xl font-bold text-slate-900 dark:text-white">42.5 MB</span>
+                          <span className="text-sm font-medium text-slate-400"> / 1 GB</span>
+                        </div>
+                      </div>
+                      
+                      <div className="w-full bg-slate-200 dark:bg-white/10 rounded-full h-2.5 overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2.5 rounded-full" style={{ width: '4.25%' }}></div>
+                      </div>
+                      
+                      <div className="flex justify-between text-[10px] text-slate-400 font-medium font-mono uppercase tracking-wider">
+                        <span>Sécurisé</span>
+                        <span className="text-indigo-500">4.25% Utilisé</span>
+                        <span>Limite</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-200 dark:border-white/10 my-6"></div>
+
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Configurez la période de rétention pour vos sauvegardes automatiques quotidiennes. Les sauvegardes plus anciennes seront purgées.
+                    </p>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">
+                        Période de rétention
+                      </label>
+                      <div className="flex flex-wrap gap-4">
+                        {['30', '60', '90'].map(days => (
+                          <label key={days} className={`flex items-center gap-2 px-6 py-3 rounded-xl border cursor-pointer transition-all ${backupRetention === days ? 'bg-indigo-500/10 border-indigo-500' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10'}`}>
+                             <input 
+                               type="radio" 
+                               name="backupRetention" 
+                               value={days} 
+                               checked={backupRetention === days} 
+                               onChange={() => setBackupRetention(days)} 
+                               className="hidden" 
+                             />
+                             <div className="flex flex-col">
+                               <span className="text-sm font-bold text-slate-900 dark:text-white">{days} jours</span>
+                               <span className="text-xs text-slate-500">Conservation des logs</span>
+                             </div>
+                             {backupRetention === days && (
+                               <div className="ml-auto w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center">
+                                 <div className="w-1.5 h-1.5 bg-white rounded-full" />
+                               </div>
+                             )}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-8 flex justify-end gap-3">
+                      <button 
+                         onClick={() => toast.success('Période de rétention mise à jour avec succès.')}
+                         className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/30 flex justify-center items-center gap-2"
+                      >
+                         <CheckCircle2 size={18} />
+                         Enregistrer la politique
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* QR Code Section */}
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-8 backdrop-blur-md shadow-sm">
                   <div className="flex items-center justify-between mb-6">
@@ -2903,6 +2990,41 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
+
+                {/* Storage Growth Chart */}
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 md:p-8 backdrop-blur-md shadow-sm h-[350px] flex flex-col">
+                  <h3 className="font-semibold text-lg text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                     <Server className="text-indigo-400" size={20} />
+                     Croissance du Stockage des Logs (30 jours)
+                  </h3>
+                  <div className="flex-1 w-full min-h-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={[
+                        { date: '16 mai', size: 15.2 },
+                        { date: '18 mai', size: 17.5 },
+                        { date: '21 mai', size: 21.3 },
+                        { date: '24 mai', size: 25.1 },
+                        { date: '27 mai', size: 28.5 },
+                        { date: '30 mai', size: 32.4 },
+                        { date: '02 jun', size: 35.8 },
+                        { date: '05 jun', size: 39.2 },
+                        { date: '08 jun', size: 42.5 }
+                      ]} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" className="text-slate-200 dark:text-white/5" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} dx={-10} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
+                          itemStyle={{ color: '#0f172a', fontWeight: 500 }}
+                          labelStyle={{ color: '#64748b', marginBottom: '4px' }}
+                          formatter={(value) => [`${value} MB`, 'Espace Utilisé']}
+                        />
+                        <Line type="monotone" name="Espace Utilisé" dataKey="size" stroke="#a855f7" strokeWidth={3} dot={{ strokeWidth: 2, r: 4 }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
               </div>
             )}
 
