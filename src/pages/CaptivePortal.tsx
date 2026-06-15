@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, Mail, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles } from 'lucide-react';
+import { Wifi, PlayCircle, CreditCard, Facebook, Mail, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -7,6 +7,8 @@ import { ThemeToggle } from '../components/ThemeToggle';
 export default function CaptivePortal() {
   const [step, setStep] = useState<'home' | 'ad' | 'success' | 'payment'>('home');
   const [adProgress, setAdProgress] = useState(0);
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   const simulateAd = () => {
     setStep('ad');
@@ -218,23 +220,56 @@ export default function CaptivePortal() {
                 key="success"
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col h-full items-center justify-center p-8 bg-transparent text-center relative"
+                className="flex flex-col h-full items-center p-8 bg-transparent text-center relative overflow-y-auto"
               >
                 {/* Background glow */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-[60px]"></div>
+                <div className="absolute top-[20%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-[60px]"></div>
 
-                <div className="w-24 h-24 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mb-6 relative z-10 border border-indigo-500/30">
+                <div className="w-24 h-24 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mt-4 mb-6 relative z-10 border border-indigo-500/30 shrink-0">
                   <CheckCircle2 size={48} />
                 </div>
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">Connecté !</h2>
-                <p className="text-indigo-200 font-medium px-4 relative z-10">Vous avez désormais accès à Internet.</p>
+                <p className="text-indigo-200 font-medium px-4 relative z-10 text-sm">Vous avez désormais accès à Internet.</p>
                 
-                <div className="mt-8 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full max-w-[280px] relative z-10 backdrop-blur-md">
+                <div className="mt-8 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
                   <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Temps restant</p>
                   <p className="text-3xl font-bold text-slate-900 dark:text-white">29:59</p>
                 </div>
 
-                <p className="mt-auto text-xs text-slate-500 flex items-center gap-1 relative z-10">
+                {!feedbackSubmitted ? (
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md mb-6">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Comment évaluez-vous votre expérience ?</p>
+                    <div className="flex justify-center gap-2 mb-4">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          onClick={() => setFeedbackRating(star)}
+                          className={`p-2 rounded-full transition-transform hover:scale-110 ${feedbackRating >= star ? 'text-amber-400' : 'text-slate-300 dark:text-slate-600 hover:text-amber-300'}`}
+                        >
+                          <Star size={24} fill={feedbackRating >= star ? 'currentColor' : 'none'} />
+                        </button>
+                      ))}
+                    </div>
+                    <button 
+                      onClick={() => setFeedbackSubmitted(true)}
+                      disabled={feedbackRating === 0}
+                      className="w-full py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 disabled:dark:bg-white/10 dark:disabled:text-white/30 text-white rounded-xl text-sm font-medium transition-colors"
+                    >
+                      Envoyer
+                    </button>
+                  </div>
+                ) : (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 p-5 rounded-2xl w-full relative z-10 mb-6"
+                  >
+                    <p className="text-sm font-medium text-indigo-600 dark:text-indigo-300 mb-1">Merci pour votre retour ! 🎉</p>
+                    <p className="text-xs text-indigo-500 dark:text-indigo-400 opacity-80">Votre avis nous aide à nous améliorer.</p>
+                  </motion.div>
+                )}
+
+                <p className="mt-auto text-xs text-slate-500 flex items-center justify-center gap-1 relative z-10 pb-4">
                   <ShieldCheck size={14}/> Connexion sécurisée par WiFiCash
                 </p>
               </motion.div>

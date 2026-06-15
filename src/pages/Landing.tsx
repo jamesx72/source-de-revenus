@@ -1,28 +1,33 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Wifi, BarChart3, Megaphone, Smartphone, Check, ArrowRight, ShieldCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { AuthModal } from '../components/AuthModal';
 
 export default function Landing() {
-  const { user, signInWithGoogle } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
-  const handleDashboardClick = async () => {
+  const handleDashboardClick = () => {
     if (user) {
       navigate('/dashboard');
     } else {
-      try {
-        await signInWithGoogle();
-        navigate('/dashboard');
-      } catch (error) {
-        console.error("Login failed", error);
-      }
+      setShowAuthModal(true);
     }
   };
+
+  const handleAuthSuccess = () => {
+    setShowAuthModal(false);
+    navigate('/dashboard');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#050614] font-sans text-slate-900 dark:text-white relative overflow-hidden">
       {/* Mesh Background Blobs */}
+
       <div className="absolute top-[-100px] left-[-100px] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none"></div>
       <div className="absolute bottom-[-100px] right-[-100px] w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[150px] pointer-events-none"></div>
 
@@ -285,12 +290,19 @@ export default function Landing() {
           <div>
             <h4 className="text-slate-900 dark:text-white font-medium mb-4">Contact</h4>
             <ul className="space-y-2 text-sm">
-              <li>contact@wificash.con</li>
+              <li>contact@wificash.com</li>
               <li>1-800-WIFI-CASH</li>
             </ul>
           </div>
         </div>
       </footer>
+
+      {showAuthModal && (
+        <AuthModal 
+          onClose={() => setShowAuthModal(false)} 
+          onSuccess={handleAuthSuccess} 
+        />
+      )}
     </div>
   );
 }

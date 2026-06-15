@@ -14,12 +14,51 @@
         "updatedAt": { "type": "timestamp" }
       },
       "required": ["subject", "message", "status", "userId", "createdAt", "updatedAt"]
+    },
+    "Location": {
+      "title": "Location",
+      "description": "A business location (e.g. café, hotel)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "address": { "type": "string" },
+        "userId": { "type": "string" },
+        "portalConfig": {
+          "type": "object",
+          "properties": {
+            "themeColor": { "type": "string" },
+            "logoUrl": { "type": "string", "nullable": true },
+            "welcomeMessage": { "type": "string", "nullable": true },
+            "termsOfService": { "type": "string", "nullable": true },
+            "layoutTheme": { "type": "string", "nullable": true },
+            "sessionDuration": { "type": "number", "nullable": true },
+            "allowExtension": { "type": "boolean", "nullable": true }
+          }
+        },
+        "notificationConfig": {
+          "type": "object",
+          "properties": {
+            "dauThreshold": { "type": "number", "nullable": true },
+            "emailEnabled": { "type": "boolean", "nullable": true },
+            "pushEnabled": { "type": "boolean", "nullable": true },
+            "notifyEmail": { "type": "string", "nullable": true }
+          }
+        },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["name", "type", "address", "userId", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "support_tickets/{ticketId}": {
       "schema": "SupportTicket",
       "description": "User support tickets"
+    },
+    "locations/{locationId}": {
+      "schema": "Location",
+      "description": "User business locations"
     }
   }
 }

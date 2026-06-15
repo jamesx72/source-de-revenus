@@ -30,6 +30,18 @@ service cloud.firestore {
              data.updatedAt == request.time;
     }
 
+    function isLocationValid(data) {
+      return data.keys().hasAll(['name', 'type', 'address', 'userId', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.type is string && data.type.size() > 0 && data.type.size() <= 50 &&
+             data.address is string && data.address.size() > 0 && data.address.size() <= 200 &&
+             (!data.keys().hasAny(['portalConfig']) || (data.portalConfig is map)) &&
+             (!data.keys().hasAny(['notificationConfig']) || (data.notificationConfig is map)) &&
+             data.userId == request.auth.uid &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+
     // Support Tickets Collection
     match /support_tickets/{ticketId} {
       allow create: if isAuthenticated() && 
@@ -38,6 +50,22 @@ service cloud.firestore {
                     
       // Only allow creators to read their own tickets
       allow read: if isOwner(resource.data.userId);
+    }
+
+    // Locations Collection
+    match /locations/{locationId} {
+      allow create: if isAuthenticated() && isLocationValid(incoming());
+      allow update: if isOwner(resource.data.userId) &&
+                    incoming().userId == resource.data.userId &&
+                    incoming().createdAt == resource.data.createdAt &&
+                    incoming().updatedAt == request.time &&
+                    incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100 &&
+                    incoming().type is string && incoming().type.size() > 0 && incoming().type.size() <= 50 &&
+                    incoming().address is string && incoming().address.size() > 0 && incoming().address.size() <= 200 &&
+                    (!incoming().keys().hasAny(['portalConfig']) || (incoming().portalConfig is map)) &&
+                    (!incoming().keys().hasAny(['notificationConfig']) || (incoming().notificationConfig is map));
+      allow read: if isOwner(resource.data.userId);
+      allow delete: if isOwner(resource.data.userId);
     }
   }
 }
