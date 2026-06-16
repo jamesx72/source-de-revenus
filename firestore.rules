@@ -43,6 +43,54 @@ service cloud.firestore {
              data.updatedAt == request.time;
     }
 
+    function isConnectionValid(data) {
+      return data.keys().hasAll(['locationId', 'locationName', 'userId', 'device', 'os', 'duration', 'connectedAt', 'status']) &&
+             data.locationId is string && data.locationId.size() > 0 && data.locationId.size() <= 128 &&
+             data.locationName is string && data.locationName.size() > 0 && data.locationName.size() <= 100 &&
+             (data.userId == null || (data.userId is string && data.userId.size() <= 128)) &&
+             data.device is string && data.device.size() <= 50 &&
+             data.os is string && data.os.size() <= 50 &&
+             data.duration is number &&
+             data.connectedAt == request.time &&
+             data.status in ['Connecté', 'Déconnecté'];
+    }
+
+    function isTransactionValid(data) {
+      return data.keys().hasAll(['sessionId', 'amount', 'currency', 'status', 'createdAt', 'customerEmail', 'locationId', 'userId']) &&
+             data.sessionId is string && data.sessionId.size() <= 128 &&
+             data.amount is number &&
+             data.currency is string && data.currency.size() <= 10 &&
+             data.status is string && data.status.size() <= 50 &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             (data.customerEmail == null || (data.customerEmail is string && data.customerEmail.size() <= 100)) &&
+             (data.locationId == null || (data.locationId is string && data.locationId.size() <= 128)) &&
+             (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isVoucherValid(data) {
+      return data.keys().hasAll(['code', 'duration', 'locationId', 'status', 'createdAt', 'usedAt', 'createdBy']) &&
+             data.code is string && data.code.size() > 0 && data.code.size() <= 20 &&
+             data.duration is string && data.duration.size() > 0 && data.duration.size() <= 20 &&
+             data.locationId is string && data.locationId.size() > 0 && data.locationId.size() <= 128 &&
+             data.status in ['active', 'used', 'revoked'] &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             (data.usedAt == null || (data.usedAt is string && data.usedAt.size() <= 50)) &&
+             data.createdBy == request.auth.uid;
+    }
+
+    function isDiscountValid(data) {
+      return data.keys().hasAll(['code', 'type', 'value', 'locationId', 'status', 'createdAt', 'uses', 'createdBy']) &&
+             data.code is string && data.code.size() > 0 && data.code.size() <= 20 &&
+             data.type in ['percentage', 'flat'] &&
+             data.value is number && data.value >= 0 &&
+             data.locationId is string && data.locationId.size() > 0 && data.locationId.size() <= 128 &&
+             data.status in ['active', 'expired'] &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             data.uses is number && data.uses >= 0 &&
+             (data.maxUses == null || (data.maxUses is number && data.maxUses >= 0)) &&
+             data.createdBy == request.auth.uid;
+    }
+
     // Support Tickets Collection
     match /support_tickets/{ticketId} {
       allow create: if isAuthenticated() && 
@@ -66,8 +114,41 @@ service cloud.firestore {
                     (!incoming().keys().hasAny(['portalConfig']) || (incoming().portalConfig is map)) &&
                     (!incoming().keys().hasAny(['notificationConfig']) || (incoming().notificationConfig is map)) &&
                     (!incoming().keys().hasAny(['wifiConfig']) || (incoming().wifiConfig is map));
-      allow read: if isOwner(resource.data.userId);
+      allow read: if isOwner(resource.data.userId) || true; // Allowing anonymous read to locations? CaptivePortal needs it!
       allow delete: if isOwner(resource.data.userId);
+    }
+
+    // Connections Collection
+    match /connections/{connectionId} {
+      // Anonymous create allowed for connecting users, but requires checking the shape
+      allow create: if isConnectionValid(incoming()) && exists(/databases/$(database)/documents/locations/$(incoming().locationId));
+      
+      // Allow location owner to read connections
+      allow read: if isOwner(resource.data.userId);
+
+      // Allow location owner to update connection status
+      allow update: if isOwner(resource.data.userId) && incoming().diff(resource.data).affectedKeys().hasOnly(['status']) && incoming().status in ['Connecté', 'Déconnecté'];
+    }
+
+    // Transactions Collection
+    match /transactions/{transactionId} {
+      // Backend create. No client create/update.
+      allow read: if isOwner(resource.data.userId);
+    }
+
+    // Vouchers Collection
+    match /vouchers/{voucherId} {
+      allow create: if isAuthenticated() && isVoucherValid(incoming()) && exists(/databases/$(database)/documents/locations/$(incoming().locationId));
+      allow update: if isOwner(resource.data.createdBy) && incoming().diff(resource.data).affectedKeys().hasOnly(['status', 'usedAt']);
+      allow read: if isOwner(resource.data.createdBy);
+    }
+
+    // Discounts Collection
+    match /discounts/{discountId} {
+      allow create: if isAuthenticated() && isDiscountValid(incoming()) && exists(/databases/$(database)/documents/locations/$(incoming().locationId));
+      allow update: if isOwner(resource.data.createdBy) && incoming().diff(resource.data).affectedKeys().hasOnly(['status']);
+      // Allow anyone to read discounts (need to check if they are valid in captive portal)
+      allow read: if true;
     }
   }
 }

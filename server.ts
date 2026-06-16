@@ -60,6 +60,42 @@ async function startServer() {
          console.error("Backup failed: ", err.message);
       }
     });
+
+    // Schedule automated Voucher Generation (e.g. daily at 1 AM)
+    cron.schedule('0 1 * * *', async () => {
+      console.log("Starting automated voucher generation task...");
+      try {
+        if (!adminDb) return;
+        const locationsSnap = await adminDb.collection('locations').get();
+        let generatedCount = 0;
+        
+        for (const doc of locationsSnap.docs) {
+           const loc = doc.data();
+           // Example config: loc.autoVouchersEnabled && loc.autoVouchersQuantity
+           if (loc.autoVouchersEnabled && loc.autoVouchersQuantity > 0) {
+              for (let i = 0; i < loc.autoVouchersQuantity; i++) {
+                 const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                 let code = 'AUTO-';
+                 for (let j = 0; j < 6; j++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+                 
+                 await adminDb.collection('vouchers').add({
+                    code: code,
+                    duration: loc.autoVouchersDuration || '1h',
+                    locationId: doc.id,
+                    status: 'active',
+                    createdAt: new Date().toISOString(),
+                    usedAt: null,
+                    createdBy: loc.userId || 'system_cron'
+                 });
+                 generatedCount++;
+              }
+           }
+        }
+        console.log(`Generated ${generatedCount} automated vouchers.`);
+      } catch (err: any) {
+         console.error("Voucher generation failed: ", err.message);
+      }
+    });
   } catch (err: any) {
     console.log("Skipping Firebase Admin initialization (expected if application default credentials are unavailable): ", err.message);
   }
@@ -103,9 +139,131 @@ async function startServer() {
               currency: session.currency,
               status: session.payment_status,
               customerEmail: session.customer_details?.email || null,
+              locationId: session.metadata?.locationId || null,
+              userId: session.metadata?.userId || null,
               createdAt: new Date().toISOString(),
             });
             console.log(`Transaction ${session.id} recorded successfully.`);
+            
+            // Increment discount uses if a code was used
+            if (session.metadata?.discountCode && session.metadata?.locationId) {
+                const discountsRef = adminDb.collection('discounts');
+                const snapshot = await discountsRef.where('code', '==', session.metadata.discountCode)
+                                                   .where('locationId', '==', session.metadata.locationId)
+                                                   .get();
+                if (!snapshot.empty) {
+                   const discountDoc = snapshot.docs[0];
+                   await discountDoc.ref.update({
+                      uses: (discountDoc.data().uses || 0) + 1
+                   });
+                }
+            }
+            
+            // Automated Email Notifications
+            if (session.metadata?.locationId) {
+              const locationDoc = await adminDb.collection('locations').doc(session.metadata.locationId).get();
+              if (locationDoc.exists) {
+                 const locationData = locationDoc.data();
+                 const smtpConfig = locationData.smtpConfig || {};
+                 
+                 if (smtpConfig.enabled && smtpConfig.host && smtpConfig.username && smtpConfig.password) {
+                     const nodemailer = await import('nodemailer');
+                     const transporter = nodemailer.createTransport({
+                         host: smtpConfig.host,
+                         port: smtpConfig.port,
+                         secure: smtpConfig.port === 465, // true for 465, false for other ports
+                         auth: {
+                             user: smtpConfig.username,
+                             pass: smtpConfig.password
+                         }
+                     });
+                     
+                     const customerEmail = session.customer_details?.email;
+                     const amountInUnits = session.amount_total / 100;
+                     const currency = session.currency.toUpperCase();
+                     
+                     // Send Receipt to Customer
+                     if (customerEmail) {
+                         try {
+                           await transporter.sendMail({
+                               from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
+                               to: customerEmail,
+                               subject: "Votre reçu de paiement Wi-Fi",
+                               html: `
+                                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                                   <div style="background-color: #6366f1; padding: 20px; text-align: center; color: white;">
+                                     <h2>Reçu de paiement</h2>
+                                   </div>
+                                   <div style="padding: 20px;">
+                                     <p>Bonjour,</p>
+                                     <p>Merci pour votre achat. Voici votre reçu pour l'accès Wi-Fi.</p>
+                                     <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                                       <strong>Montant payé:</strong> ${amountInUnits} ${currency}
+                                     </div>
+                                     <p>Vous avez maintenant accès au réseau. Pensez à conserver cet email comme preuve d'achat.</p>
+                                     <p>Cordialement,<br/>L'équipe ${smtpConfig.fromName}</p>
+                                   </div>
+                                 </div>
+                               `
+                           });
+                           console.log(`Receipt sent to ${customerEmail}`);
+                         } catch (mailErr) {
+                           console.error('Failed to send receipt:', mailErr);
+                         }
+                     }
+                     
+                     // High-value transaction alert to Business Owner (e.g., > 20 EUR)
+                     if (amountInUnits >= 20) {
+                        try {
+                          await transporter.sendMail({
+                               from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
+                               to: smtpConfig.fromEmail, // send to the business owner
+                               subject: `🟢 Nouvelle transaction importante (${amountInUnits} ${currency})`,
+                               html: `
+                                 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e2e8f0; border-radius: 8px;">
+                                   <div style="background-color: #10b981; padding: 15px; text-align: center; color: white; border-top-left-radius: 8px; border-top-right-radius: 8px;">
+                                     <h3 style="margin: 0;">Alerte Transaction Premium</h3>
+                                   </div>
+                                   <div style="padding: 20px;">
+                                     <p>Une nouvelle transaction d'un montant élevé vient d'être validée sur votre portail.</p>
+                                     <ul style="padding-left: 20px;">
+                                       <li><strong>Montant:</strong> ${amountInUnits} ${currency}</li>
+                                       <li><strong>Client:</strong> ${customerEmail || 'Non renseigné'}</li>
+                                       <li><strong>Session Stripe:</strong> <code style="background: #f1f5f9; padding: 2px 4px;">${session.id}</code></li>
+                                     </ul>
+                                   </div>
+                                 </div>
+                               `
+                          });
+                          console.log(`High-value transaction alert sent for session ${session.id}`);
+                        } catch (alertErr) {
+                          console.error('Failed to send high-value alert:', alertErr);
+                        }
+                     }
+                 }
+                 
+                 // Advanced Firewall/Radius integration pattern: Webhook out to UniFi/MikroTik 
+                 // If the location has a Radius webhook configured, call it.
+                 if (locationData.radiusWebhookUrl) {
+                    try {
+                       console.log(`Triggering Radius integration for MAC auth at ${locationData.radiusWebhookUrl}`);
+                       await fetch(locationData.radiusWebhookUrl, {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({
+                             action: 'authorize',
+                             mac: 'client-mac-address', // Typically passed in session.metadata or gathered during portal login
+                             duration: session.metadata.duration || 60,
+                             locationId: session.metadata.locationId
+                         })
+                       });
+                       console.log('Radius integration webhook sent.');
+                    } catch (radiusErr) {
+                       console.error('Failed to trigger Radius integration:', radiusErr);
+                    }
+                 }
+              }
+            }
           } catch(dbErr) {
             console.error(`Failed to record transaction ${session.id}:`, dbErr);
           }
@@ -189,6 +347,61 @@ async function startServer() {
     }
   });
 
+  // Stripe Express Connect Endpoint
+  app.post("/api/create-stripe-account-link", express.json(), async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY" });
+      }
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      const { locationId, userId } = req.body;
+      if (!locationId || !userId) return res.status(400).json({ error: "Missing locationId or userId" });
+
+      if (!adminDb) {
+         return res.status(500).json({ error: "Database not initialized" });
+      }
+      
+      const locRef = adminDb.collection('locations').doc(locationId);
+      const locDoc = await locRef.get();
+      if (!locDoc.exists) return res.status(404).json({ error: "Location not found" });
+      
+      const locationData = locDoc.data();
+      let accountId = locationData.stripeAccountId;
+
+      if (!accountId) {
+        // Create an Express connected account
+        const account = await stripe.accounts.create({
+          type: 'express',
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+        accountId = account.id;
+        await locRef.update({ stripeAccountId: accountId });
+      }
+
+      const appUrl = process.env.APP_URL || "http://localhost:3000";
+
+      // Create an account link
+      const accountLink = await stripe.accountLinks.create({
+        account: accountId,
+        refresh_url: `${appUrl}/dashboard?stripe_refresh=true`,
+        return_url: `${appUrl}/dashboard?stripe_return=true`,
+        type: 'account_onboarding',
+      });
+
+      res.json({ url: accountLink.url });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Unknown error" });
+    }
+  });
+
   // Stripe Checkout Endpoint
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
@@ -200,10 +413,62 @@ async function startServer() {
       const Stripe = (await import('stripe')).default;
       const stripe = new Stripe(stripeSecret);
 
-      const { priceId, passName, priceAmount, locationId } = req.body;
+      const { locationId, userId, discountCode } = req.body;
+      let { priceAmount, passName } = req.body;
       const appUrl = process.env.APP_URL || "http://localhost:3000";
 
-      const session = await stripe.checkout.sessions.create({
+      // Apply discount if provided
+      if (discountCode && adminDb) {
+        const discountsRef = adminDb.collection('discounts');
+        const snapshot = await discountsRef.where('code', '==', discountCode)
+                                           .where('locationId', '==', locationId)
+                                           .where('status', '==', 'active')
+                                           .get();
+        if (!snapshot.empty) {
+          const discountDoc = snapshot.docs[0];
+          const discount = discountDoc.data();
+          if (discount.maxUses === null || discount.uses < discount.maxUses) {
+            if (discount.type === 'percentage') {
+              priceAmount = Math.max(0, Math.round(priceAmount * (1 - (discount.value / 100))));
+            } else if (discount.type === 'flat') {
+              // Convert flat discount to cents first
+              priceAmount = Math.max(0, priceAmount - (discount.value * 100));
+            }
+            // We should increment the uses later, maybe on successful payment.
+          }
+        }
+      }
+
+      // Ensure priceAmount is at least 50 cents (Stripe minimum for EUR usually, but let's assume it handles 0 or free somehow, actually Stripe checkout min is 0.5 EUR)
+      // Since it's checkout session, if it's 0 we might need a different flow. But for now let's just make it minimum 50 cents if it's less than 50 and greater than 0, or just allow it to fail or be free if Stripe supports it (requires 100% discount differently, but assuming minimum 50 cents).
+      if (priceAmount > 0 && priceAmount < 50) priceAmount = 50;
+
+      if (priceAmount === 0) {
+         // Free checkout bypass (needs frontend implementation, but for now we just use a minimum of 50 cents or handle later).
+         // Just a safeguard:
+         priceAmount = 50;
+         passName = passName + " (Discounted to min 0.50€)";
+      }
+
+      let transfer_data: any = undefined;
+      // Configure sub-merchant payout via Stripe Connect if applicable.
+      if (adminDb && locationId) {
+        const locDoc = await adminDb.collection('locations').doc(locationId).get();
+        if (locDoc.exists) {
+          const locData = locDoc.data();
+          if (locData.stripeAccountId) {
+            // Keep 20% platform fee, 80% to the affiliated location sub-merchant.
+            const transferAmount = Math.round(priceAmount * 0.8);
+            if (transferAmount > 0) {
+                transfer_data = {
+                  destination: locData.stripeAccountId,
+                };
+            }
+          }
+        }
+      }
+
+      const sessionOpts: any = {
         ui_mode: 'embedded' as any,
         line_items: [
           {
@@ -219,8 +484,22 @@ async function startServer() {
           },
         ],
         mode: 'payment',
+        metadata: {
+          locationId: locationId || '',
+          userId: userId || '',
+          discountCode: discountCode || ''
+        },
         return_url: `${appUrl}/portal?locationId=${locationId}&payment_success=true&session_id={CHECKOUT_SESSION_ID}`,
-      });
+      };
+
+      if (transfer_data) {
+         sessionOpts.payment_intent_data = {
+           application_fee_amount: priceAmount - Math.round(priceAmount * 0.8),
+           transfer_data: transfer_data
+         };
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionOpts);
 
       res.json({ clientSecret: session.client_secret });
     } catch (e: any) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star } from 'lucide-react';
+import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -27,6 +27,12 @@ export default function CaptivePortal() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Promo code feature
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<any>(null);
+  const [promoError, setPromoError] = useState('');
+  const [isApplyingPromo, setIsApplyingPromo] = useState(false);
 
   useEffect(() => {
     const fetchLocation = async () => {
@@ -94,26 +100,65 @@ export default function CaptivePortal() {
     fetchLocation();
   }, [locationId, searchParams]);
 
-  const handleCheckout = async (priceAmount: number, passName: string) => {
+  const handleCheckout = async (basePriceAmount: number, passName: string) => {
     setIsProcessingPayment(true);
     try {
       const res = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceAmount, passName, locationId })
+        body: JSON.stringify({ 
+           priceAmount: basePriceAmount, 
+           passName, 
+           locationId, 
+           userId: locationOwnerId,
+           discountCode: appliedPromo?.code || ''
+        })
       });
       const data = await res.json();
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
         setStep('payment');
       } else {
-        alert(data.error || 'Erreur lors de la création de la session de paiement');
+        alert(data.error || 'Erreur lors de la session');
       }
     } catch (err) {
       console.error(err);
       alert('Erreur inconnue');
     } finally {
       setIsProcessingPayment(false);
+    }
+  };
+
+  const handleApplyPromo = async () => {
+    if (!promoCodeInput.trim()) return;
+    setIsApplyingPromo(true);
+    setPromoError('');
+    try {
+      const { collection, query, where, getDocs } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      const discountsRef = collection(db, 'discounts');
+      const q = query(discountsRef, where('code', '==', promoCodeInput.trim().toUpperCase()), where('locationId', '==', locationId), where('status', '==', 'active'));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        setPromoError('Code promo invalide ou expiré.');
+        setAppliedPromo(null);
+      } else {
+        const discountDoc = snapshot.docs[0];
+        const data = discountDoc.data();
+        if (data.maxUses !== null && data.uses >= data.maxUses) {
+            setPromoError('Ce code a atteint sa limite d\'utilisation.');
+            setAppliedPromo(null);
+        } else {
+            setAppliedPromo({ id: discountDoc.id, ...data });
+        }
+      }
+    } catch (err) {
+       console.error(err);
+       setPromoError('Erreur lors de la vérification.');
+    } finally {
+       setIsApplyingPromo(true);
+       setTimeout(() => setIsApplyingPromo(false), 500); // Visual feedback
     }
   };
 
@@ -176,6 +221,8 @@ export default function CaptivePortal() {
   };
 
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [hasShownExpiryWarning, setHasShownExpiryWarning] = useState(false);
+  const [showExpiryWarning, setShowExpiryWarning] = useState(false);
 
   useEffect(() => {
     if (step === 'success') {
@@ -193,6 +240,26 @@ export default function CaptivePortal() {
     }, 1000);
     return () => clearInterval(interval);
   }, [timeLeft]);
+
+  useEffect(() => {
+    if (timeLeft !== null && timeLeft <= 300 && timeLeft > 0 && !hasShownExpiryWarning) {
+      setShowExpiryWarning(true);
+      setHasShownExpiryWarning(true);
+    }
+  }, [timeLeft, hasShownExpiryWarning]);
+
+  const getDisplayPrice = (baseCents: number) => {
+    if (!appliedPromo) return (baseCents / 100).toFixed(2) + " €";
+    let newCents = baseCents;
+    if (appliedPromo.type === 'percentage') {
+       newCents = Math.max(0, Math.round(baseCents * (1 - (appliedPromo.value / 100))));
+    } else if (appliedPromo.type === 'flat') {
+       newCents = Math.max(0, baseCents - (appliedPromo.value * 100));
+    }
+    // Stripe minimum handled on backend but for display we can show 0 or exact. Backend caps at 50 cents.
+    if (newCents > 0 && newCents < 50) newCents = 50; 
+    return (newCents / 100).toFixed(2) + " €";
+  };
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -294,7 +361,10 @@ export default function CaptivePortal() {
                           <p className="font-bold text-sm">Premium 2 Heures</p>
                           <p className="text-xs text-slate-500 opacity-80">Haut débit sans publicité</p>
                        </div>
-                       <div className="font-bold">2.00 €</div>
+                       <div className="font-bold flex items-center gap-2">
+                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">2.00 €</span>}
+                        {getDisplayPrice(200)}
+                       </div>
                       </button>
                       <button 
                         onClick={() => handleCheckout(500, "Pass Journée")}
@@ -305,8 +375,44 @@ export default function CaptivePortal() {
                           <p className="font-bold text-sm">Pass Journée</p>
                           <p className="text-xs text-slate-500 opacity-80">Accès illimité 24h</p>
                        </div>
-                       <div className="font-bold">5.00 €</div>
+                       <div className="font-bold flex items-center gap-2">
+                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">5.00 €</span>}
+                        {getDisplayPrice(500)}
+                       </div>
                       </button>
+                    </div>
+                  )}
+
+                  {portalConfig?.allowExtension && (
+                    <div className="w-full mb-6">
+                      {appliedPromo ? (
+                        <div className="mb-4 p-3 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 text-green-700 dark:text-green-400 rounded-xl flex items-center justify-between text-sm">
+                          <span className="font-medium">Code appliqué : {appliedPromo.code} (-{appliedPromo.type === 'percentage' ? `${appliedPromo.value}%` : `${appliedPromo.value}€`})</span>
+                          <button onClick={() => setAppliedPromo(null)} className="opacity-70 hover:opacity-100 flex items-center justify-center p-1">
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 mb-4">
+                          <input 
+                            type="text"
+                            value={promoCodeInput}
+                            onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                            placeholder="Code promo ?"
+                            className="flex-1 px-4 py-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-mono"
+                          />
+                          <button 
+                            onClick={handleApplyPromo}
+                            disabled={isApplyingPromo || !promoCodeInput.trim()}
+                            className="px-4 py-2 bg-slate-900 dark:bg-indigo-600 text-white rounded-xl font-medium text-sm disabled:opacity-50 transition-colors"
+                          >
+                            {isApplyingPromo ? '...' : 'Appliquer'}
+                          </button>
+                        </div>
+                      )}
+                      {promoError && (
+                         <p className="text-red-500 text-xs mt-1 text-left px-1 mb-4">{promoError}</p>
+                      )}
                     </div>
                   )}
                   
@@ -461,6 +567,42 @@ export default function CaptivePortal() {
                     Continuer vers le site
                   </button>
                 )}
+
+                <AnimatePresence>
+                  {showExpiryWarning && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 50, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                      className="absolute bottom-4 left-4 right-4 bg-amber-500 text-white rounded-2xl p-5 shadow-2xl z-50 flex flex-col gap-3"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2 font-bold text-lg">
+                           <AlertCircle size={20} />
+                           Session bientôt expirée
+                        </div>
+                        <button onClick={() => setShowExpiryWarning(false)} className="p-1 hover:bg-black/10 rounded-lg transition-colors">
+                          <X size={18} />
+                        </button>
+                      </div>
+                      <p className="text-sm font-medium text-amber-50 leading-snug text-left">
+                        Votre session Wi-Fi expire dans moins de 5 minutes.
+                      </p>
+                      
+                      <button 
+                        onClick={() => {
+                           setShowExpiryWarning(false);
+                           handleCheckout(200, "Extension Premium 2 Heures");
+                        }}
+                        disabled={isProcessingPayment}
+                        className="mt-2 w-full py-3 bg-white text-amber-600 font-bold rounded-xl shadow-sm hover:bg-amber-50 transition-colors flex items-center justify-center gap-2 active:scale-95"
+                      >
+                        <span>Prolonger la session (+2h)</span>
+                        {isProcessingPayment && <div className="w-4 h-4 border-2 border-amber-600/30 border-t-amber-600 rounded-full animate-spin"></div>}
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {!feedbackSubmitted ? (
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md mb-6 mt-auto">

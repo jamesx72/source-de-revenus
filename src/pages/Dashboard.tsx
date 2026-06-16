@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard } from 'lucide-react';
+import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -13,52 +13,8 @@ import { DashboardSkeleton } from '../components/DashboardSkeleton';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
 
-const REVENUE_DATA = [
-  { name: 'Lun', sales: 4000, ads: 2400 },
-  { name: 'Mar', sales: 3000, ads: 1398 },
-  { name: 'Mer', sales: 2000, ads: 9800 },
-  { name: 'Jeu', sales: 2780, ads: 3908 },
-  { name: 'Ven', sales: 1890, ads: 4800 },
-  { name: 'Sam', sales: 2390, ads: 3800 },
-  { name: 'Dim', sales: 3490, ads: 4300 },
-];
-
-const MONTHLY_REVENUE_DATA = [
-  { name: 'Jan', sales: 12000, ads: 8400 },
-  { name: 'Fév', sales: 15000, ads: 9200 },
-  { name: 'Mar', sales: 18000, ads: 11000 },
-  { name: 'Avr', sales: 14000, ads: 13900 },
-  { name: 'Mai', sales: 22000, ads: 18000 },
-  { name: 'Juin', sales: 26000, ads: 21000 },
-];
-
-const WIFI_USAGE_DATA = [
-  { name: 'Jan', sessions: 4000, dataGB: 450 },
-  { name: 'Fév', sessions: 3500, dataGB: 380 },
-  { name: 'Mar', sessions: 5200, dataGB: 590 },
-  { name: 'Avr', sessions: 4800, dataGB: 510 },
-  { name: 'Mai', sessions: 6100, dataGB: 720 },
-  { name: 'Juin', sessions: 7400, dataGB: 850 },
-];
-
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 const HOURS = Array.from({length: 24}, (_, i) => i);
-
-const DEVICE_DISTRIBUTION_DATA = [
-  { name: 'Mobile', value: 65, color: '#818cf8', icon: <Smartphone size={16} /> },
-  { name: 'Desktop', value: 25, color: '#34d399', icon: <LayoutDashboard size={16} /> },
-  { name: 'Tablet', value: 10, color: '#fbbf24', icon: <Smartphone size={16} className="rotate-90" /> },
-];
-
-const REDEMPTION_DATA = [
-  { name: 'Lun', premium: 12, coffee: 5 },
-  { name: 'Mar', premium: 19, coffee: 8 },
-  { name: 'Mer', premium: 15, coffee: 12 },
-  { name: 'Jeu', premium: 22, coffee: 9 },
-  { name: 'Ven', premium: 30, coffee: 15 },
-  { name: 'Sam', premium: 45, coffee: 25 },
-  { name: 'Dim', premium: 35, coffee: 30 },
-];
 
 const TRANSLATIONS = {
   fr: {
@@ -94,13 +50,13 @@ export default function Dashboard() {
   const t = TRANSLATIONS[language];
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [ratioConfig, setRatioConfig] = useState({ hours: 1, points: 10 });
-  const [wifiConfig, setWifiConfig] = useState({ timeLimit: 'unlimited', customTimeLimit: 120, bandwidth: '10', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
+  const [wifiConfig, setWifiConfig] = useState({ timeLimit: 'unlimited', customTimeLimit: 120, downloadSpeed: 'unlimited', uploadSpeed: 'unlimited', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
   const [portalConfig, setPortalConfig] = useState<{ themeColor: string; logoUrl: string | null }>({ themeColor: '#6366f1', logoUrl: null });
   const [smtpConfig, setSmtpConfig] = useState({ enabled: false, host: '', port: 587, username: '', password: '', fromName: 'Mon Établissement', fromEmail: 'no-reply@mon-etablissement.com' });
   const [promoBanner, setPromoBanner] = useState({ enabled: false, title: 'Happy Hour !', description: '-20% sur toutes les boissons de 18h à 20h.', type: 'info', scheduleType: 'always', startTime: '18:00', endTime: '20:00', imageUrl: '', linkUrl: '' });
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [backupRetention, setBackupRetention] = useState('30');
-  const [adsRevenueTimeframe, setAdsRevenueTimeframe] = useState<'daily' | 'monthly'>('daily');
+  const [adsRevenueTimeframe, setAdsRevenueTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [overviewTimeframe, setOverviewTimeframe] = useState<'daily' | 'monthly'>('daily');
   const [analyticsTimeframe, setAnalyticsTimeframe] = useState<'daily' | 'monthly'>('monthly');
   const [isDataLoading, setIsDataLoading] = useState(true);
@@ -118,15 +74,16 @@ export default function Dashboard() {
       
       await setDoc(docRef, {
         wifiConfig: wifiConfig,
+        smtpConfig: smtpConfig,
         updatedAt: serverTimestamp()
       }, { merge: true });
       
-      toast.success("Configuration Wi-Fi enregistrée!");
+      toast.success("Configuration réseau enregistrée!");
       
       // Update local state copy
       setLocations(prev => prev.map(loc => 
         loc.id === primaryLocation.id 
-          ? { ...loc, wifiConfig } 
+          ? { ...loc, wifiConfig, smtpConfig } 
           : loc
       ));
     } catch (err: any) {
@@ -149,7 +106,7 @@ export default function Dashboard() {
     })
   );
 
-  const [widgetOrder, setWidgetOrder] = useState(['stats', 'revenue', 'plans', 'connections', 'activity']);
+  const [widgetOrder, setWidgetOrder] = useState(['revenue', 'plansAndHealth', 'visitors', 'activity', 'activeDevices']);
 
   function handleWidgetDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -181,11 +138,17 @@ export default function Dashboard() {
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
   const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
+
+  const [discounts, setDiscounts] = useState<any[]>([]);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [isGeneratingDiscount, setIsGeneratingDiscount] = useState(false);
+  const [discountConfig, setDiscountConfig] = useState({ code: '', type: 'percentage', value: 10, maxUses: 100, locationId: '' });
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
   const [locationFormError, setLocationFormError] = useState('');
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
 
   // Portal Config Modal
   const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
@@ -217,6 +180,7 @@ export default function Dashboard() {
     let unsubscribeConnections: (() => void) | undefined;
     let unsubscribeTransactions: (() => void) | undefined;
     let unsubscribeVouchers: (() => void) | undefined;
+    let unsubscribeDiscounts: (() => void) | undefined;
     async function fetchLocations() {
       if (!user) {
         setIsDataLoading(false);
@@ -239,8 +203,16 @@ export default function Dashboard() {
           lastHeartbeat: Date.now() - (idx === 0 ? 30000 : 360000) 
         })) as any[];
         setLocations(locs);
-        if (locs.length > 0 && locs[0].wifiConfig) {
-          setWifiConfig(prev => ({ ...prev, ...locs[0].wifiConfig }));
+        if (locs.length > 0) {
+          if (locs[0].wifiConfig) {
+            const loadedWifiConfig = locs[0].wifiConfig;
+            const downloadSpeed = loadedWifiConfig.downloadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
+            const uploadSpeed = loadedWifiConfig.uploadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
+            setWifiConfig(prev => ({ ...prev, ...loadedWifiConfig, downloadSpeed, uploadSpeed }));
+          }
+          if (locs[0].smtpConfig) {
+            setSmtpConfig(prev => ({ ...prev, ...locs[0].smtpConfig }));
+          }
         }
 
         const connectionsQuery = query(
@@ -260,6 +232,7 @@ export default function Dashboard() {
 
         const transactionsQuery = query(
           collection(db, 'transactions'),
+          where('userId', '==', user.uid),
           orderBy('createdAt', 'desc')
         );
         unsubscribeTransactions = onSnapshot(transactionsQuery, (snapshot) => {
@@ -274,6 +247,7 @@ export default function Dashboard() {
 
         const vouchersQuery = query(
           collection(db, 'vouchers'),
+          where('createdBy', '==', user.uid),
           orderBy('createdAt', 'desc')
         );
         unsubscribeVouchers = onSnapshot(vouchersQuery, (snapshot) => {
@@ -284,6 +258,21 @@ export default function Dashboard() {
            setVouchers(vData);
         }, (error) => {
            console.error("Error fetching vouchers in real-time:", error);
+        });
+
+        const discountsQuery = query(
+          collection(db, 'discounts'),
+          where('createdBy', '==', user.uid),
+          orderBy('createdAt', 'desc')
+        );
+        unsubscribeDiscounts = onSnapshot(discountsQuery, (snapshot) => {
+           const dData = snapshot.docs.map(doc => ({
+             id: doc.id,
+             ...doc.data()
+           }));
+           setDiscounts(dData);
+        }, (error) => {
+           console.error("Error fetching discounts in real-time:", error);
         });
 
       } catch (err: any) {
@@ -302,6 +291,9 @@ export default function Dashboard() {
       }
       if (unsubscribeVouchers) {
         unsubscribeVouchers();
+      }
+      if (unsubscribeDiscounts) {
+        unsubscribeDiscounts();
       }
     };
   }, [user]);
@@ -371,6 +363,30 @@ export default function Dashboard() {
     }
   };
 
+  const [isConnectingStripe, setIsConnectingStripe] = useState<string | null>(null);
+
+  const handleConnectStripe = async (locationId: string) => {
+    setIsConnectingStripe(locationId);
+    try {
+      const response = await fetch('/api/create-stripe-account-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId, userId: user?.uid }),
+      });
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error("Erreur de connexion avec Stripe.");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur de connexion.");
+    } finally {
+      setIsConnectingStripe(null);
+    }
+  };
+
   const handleDeleteLocation = async (id: string) => {
     if (!user || !confirm('Voulez-vous vraiment supprimer cet établissement ?')) return;
     
@@ -424,6 +440,57 @@ export default function Dashboard() {
       toast.error("Erreur lors de la génération des codes.");
     } finally {
       setIsGeneratingVouchers(false);
+    }
+  };
+
+  const handleGenerateDiscount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!discountConfig.code || discountConfig.value <= 0 || !discountConfig.locationId) {
+      toast.error("Veuillez remplir tous les champs correctement.");
+      return;
+    }
+    
+    setIsGeneratingDiscount(true);
+    try {
+      const { collection, addDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      await addDoc(collection(db, 'discounts'), {
+        code: discountConfig.code.toUpperCase().replace(/\s+/g, ''),
+        type: discountConfig.type,
+        value: discountConfig.value,
+        locationId: discountConfig.locationId,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        uses: 0,
+        maxUses: discountConfig.maxUses || null,
+        createdBy: user.uid
+      });
+      
+      toast.success("Code promo créé avec succès.");
+      setShowDiscountModal(false);
+      setDiscountConfig({ code: '', type: 'percentage', value: 10, maxUses: 100, locationId: locations[0]?.id || '' });
+    } catch (err: any) {
+      console.error("Failed to generate discount:", err.message);
+      toast.error("Erreur lors de la création du code promo.");
+    } finally {
+      setIsGeneratingDiscount(false);
+    }
+  };
+
+  const handleRevokeDiscount = async (discountId: string) => {
+    if (!confirm('Voulez-vous vraiment révoquer ce code promo ?')) return;
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      await updateDoc(doc(db, 'discounts', discountId), {
+        status: 'expired'
+      });
+      toast.success("Code promo révoqué.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erreur lors de la révocation.");
     }
   };
 
@@ -668,19 +735,19 @@ export default function Dashboard() {
   useEffect(() => {
     // Simulate bandwidth hit notification
     const interval = setInterval(() => {
-      if (wifiConfig.bandwidth !== 'unlimited') {
+      if (wifiConfig.downloadSpeed !== 'unlimited' && wifiConfig.downloadSpeed) {
         const usagePattern = Math.random();
         // 30% chance every 15 seconds to trigger the warning if bandwidth is restricted
         if (usagePattern > 0.7) {
           toast.warning('Alerte de Congestion Réseau', {
-            description: `85% de vos sessions actives atteignent la limite configurée de ${wifiConfig.bandwidth} Mbps. Pensez à ajuster le plafond pour optimiser l'expérience.`,
+            description: `85% de vos sessions actives atteignent la limite descendante configurée de ${wifiConfig.downloadSpeed} Mbps. Pensez à ajuster le plafond pour optimiser l'expérience.`,
             duration: 8000,
           });
         }
       }
     }, 15000);
     return () => clearInterval(interval);
-  }, [wifiConfig.bandwidth]);
+  }, [wifiConfig.downloadSpeed]);
   const [redeemModal, setRedeemModal] = useState<{ isOpen: boolean; userId: string | null }>({ isOpen: false, userId: null });
   const [selectedRewardId, setSelectedRewardId] = useState<string | null>(null);
 
@@ -727,9 +794,16 @@ export default function Dashboard() {
     return <Navigate to="/" replace />;
   }
 
-  const { dynamicRevenueDaily, dynamicRevenueMonthly } = React.useMemo(() => {
+  const { dynamicRevenueDaily, dynamicRevenueWeekly, dynamicRevenueMonthly } = React.useMemo(() => {
     const dailyMap: Record<string, { sales: number, ads: number }> = {};
+    const weeklyMap: Record<string, { sales: number, ads: number }> = {};
     const monthlyMap: Record<string, { sales: number, ads: number }> = {};
+
+    const getWeekOfMonth = (d: Date) => {
+      const firstDay = new Date(d.getFullYear(), d.getMonth(), 1).getDay();
+      const offsetDate = d.getDate() + firstDay - 1; 
+      return Math.floor(offsetDate / 7) + 1;
+    }
 
     transactions.forEach(t => {
       const date = new Date(t.createdAt);
@@ -740,12 +814,16 @@ export default function Dashboard() {
       
       const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
       const monthM = monthStr.charAt(0).toUpperCase() + monthStr.slice(1).replace('.', '');
+      
+      const weekM = `Semaine ${getWeekOfMonth(date)}`;
 
       if (!dailyMap[dayM]) dailyMap[dayM] = { sales: 0, ads: 0 };
+      if (!weeklyMap[weekM]) weeklyMap[weekM] = { sales: 0, ads: 0 };
       if (!monthlyMap[monthM]) monthlyMap[monthM] = { sales: 0, ads: 0 };
 
       if (t.status === 'paid' && t.amount) {
         dailyMap[dayM].sales += t.amount;
+        weeklyMap[weekM].sales += t.amount;
         monthlyMap[monthM].sales += t.amount;
       }
     });
@@ -760,18 +838,37 @@ export default function Dashboard() {
       const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
       const monthM = monthStr.charAt(0).toUpperCase() + monthStr.slice(1).replace('.', '');
 
+      const weekM = `Semaine ${getWeekOfMonth(date)}`;
+
       if (!dailyMap[dayM]) dailyMap[dayM] = { sales: 0, ads: 0 };
+      if (!weeklyMap[weekM]) weeklyMap[weekM] = { sales: 0, ads: 0 };
       if (!monthlyMap[monthM]) monthlyMap[monthM] = { sales: 0, ads: 0 };
       
       dailyMap[dayM].ads += 0.15;
+      weeklyMap[weekM].ads += 0.15;
       monthlyMap[monthM].ads += 0.15;
     });
 
     const daily = DAYS.map(d => ({ name: d, sales: dailyMap[d]?.sales || 0, ads: dailyMap[d]?.ads || 0 }));
+    let weekly = Object.keys(weeklyMap).map(w => ({ name: w, sales: weeklyMap[w].sales, ads: weeklyMap[w].ads }));
     let monthly = Object.keys(monthlyMap).map(m => ({ name: m, sales: monthlyMap[m].sales, ads: monthlyMap[m].ads }));
-    if (monthly.length === 0) monthly = MONTHLY_REVENUE_DATA;
+    
+    weekly.sort((a,b) => a.name.localeCompare(b.name));
 
-    return { dynamicRevenueDaily: daily, dynamicRevenueMonthly: monthly };
+    if (weekly.length === 0) {
+      weekly = [
+        { name: 'Semaine 1', sales: 0, ads: 0 },
+        { name: 'Semaine 2', sales: 0, ads: 0 },
+        { name: 'Semaine 3', sales: 0, ads: 0 },
+        { name: 'Semaine 4', sales: 0, ads: 0 },
+      ];
+    }
+    if (monthly.length === 0) {
+      const mos = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin'];
+      monthly = mos.map(m => ({ name: m, sales: 0, ads: 0 }));
+    }
+
+    return { dynamicRevenueDaily: daily, dynamicRevenueWeekly: weekly, dynamicRevenueMonthly: monthly };
   }, [transactions, connections]);
 
   const dynamicWifiUsage = React.useMemo(() => {
@@ -786,8 +883,18 @@ export default function Dashboard() {
        monthsMap[monthM].dataGB += 0.2;
     });
     const usage = Object.keys(monthsMap).map(m => ({ name: m, sessions: monthsMap[m].sessions, dataGB: Math.round(monthsMap[m].dataGB) }));
-    return usage.length > 0 ? usage : WIFI_USAGE_DATA;
+    if (usage.length === 0) {
+       const mos = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin'];
+       return mos.map(m => ({ name: m, sessions: 0, dataGB: 0 }));
+    }
+    return usage;
   }, [connections]);
+
+  const dynamicRedemptionData = React.useMemo(() => {
+    // In a full implementation, you would query a 'redemptions' collection
+    // For now, returning real dynamic metrics which evaluates to 0.
+    return DAYS.map(d => ({ name: d, premium: 0, coffee: 0 }));
+  }, []);
 
   const dynamicDeviceDistribution = React.useMemo(() => {
     const dist: Record<string, number> = { Mobile: 0, Desktop: 0, Tablet: 0 };
@@ -801,7 +908,13 @@ export default function Dashboard() {
        total++;
     });
 
-    if (total === 0) return DEVICE_DISTRIBUTION_DATA;
+    if (total === 0) {
+      return [
+        { name: 'Mobile', value: 0, color: '#818cf8', icon: <Smartphone size={16} /> },
+        { name: 'Desktop', value: 0, color: '#34d399', icon: <LayoutDashboard size={16} /> },
+        { name: 'Tablet', value: 0, color: '#fbbf24', icon: <Smartphone size={16} className="rotate-90" /> },
+      ];
+    }
 
     return [
       { name: 'Mobile', value: Math.round((dist.Mobile / total) * 100) || 0, color: '#818cf8', icon: <Smartphone size={16} /> },
@@ -877,8 +990,10 @@ export default function Dashboard() {
             {[
               { id: 'overview', icon: LayoutDashboard, label: 'Tableau de bord' },
               { id: 'locations', icon: MapPin, label: 'Établissements' },
+              { id: 'branding', icon: Palette, label: 'Venue Branding' },
               { id: 'wifi', icon: Wifi, label: 'Forfaits Wi-Fi' },
               { id: 'vouchers', icon: Ticket, label: 'Vouchers & Accès' },
+              { id: 'discounts', icon: Gift, label: 'Codes Promo' },
               { id: 'users', icon: Users, label: 'Visiteurs & CRM' },
               { id: 'ads', icon: DollarSign, label: 'Publicités & Revenus' },
               { id: 'transactions', icon: CreditCard, label: 'Transactions' },
@@ -1235,6 +1350,100 @@ export default function Dashboard() {
                       </SortableWidget>
                     );
 
+                    if (widgetId === 'activeDevices') return (
+                      <SortableWidget key="activeDevices" id="activeDevices" className="lg:col-span-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm p-6 cursor-grab active:cursor-grabbing flex flex-col">
+                        <div className="flex items-center justify-between mb-6">
+                           <h3 className="font-semibold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                             Appareils Connectés
+                           </h3>
+                           <button className="text-slate-400 hover:text-indigo-500 transition-colors">
+                            <MoreHorizontal size={20} />
+                           </button>
+                        </div>
+                        <div className="flex-1 overflow-auto pr-2 -mr-2">
+                          <div className="space-y-4">
+                            {connections.filter(c => c.status === 'Connecté').length === 0 ? (
+                               <div className="text-center py-8 text-slate-500 dark:text-slate-400 italic text-sm">Aucune session active en ce moment.</div>
+                            ) : (
+                               connections.filter(c => c.status === 'Connecté').map((log) => {
+                                  let durationNum = log.duration;
+                                  if (typeof durationNum === 'string') {
+                                     durationNum = parseInt(durationNum.replace(/[^0-9]/g, '')) || 0;
+                                  }
+                                  let limitNum: number = typeof wifiConfig.customTimeLimit === 'number' ? wifiConfig.customTimeLimit : parseInt(wifiConfig.timeLimit) || 120;
+                                  if (wifiConfig.timeLimit === 'unlimited') limitNum = Math.max(durationNum, 120);
+
+                                  let usagePercent = log.duration && limitNum ? Math.min(100, Math.round(((durationNum || 0) / limitNum) * 100)) : 0;
+                                  
+                                  const renderSpeed = (speed: string) => speed === 'unlimited' ? 'Max' : `${speed}M`;
+                                  
+                                  return (
+                                     <div key={log.id} className="p-4 bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 group hover:border-indigo-200 dark:hover:border-indigo-500/30 transition-colors">
+                                         <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                                              <Smartphone size={18} />
+                                            </div>
+                                            <div>
+                                              <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2 text-sm sm:text-base">
+                                                {log.device || "Appareil Inconnu"}
+                                              </div>
+                                              <div className="text-xs text-slate-500 mt-0.5">{log.os || "Inconnu"} • {durationNum} min</div>
+                                            </div>
+                                         </div>
+                                         
+                                         <div className="flex-1 min-w-[200px] w-full max-w-sm px-2">
+                                            <div className="flex items-center justify-between text-[11px] mb-1.5 px-0.5">
+                                              <span className="text-slate-500 flex items-center gap-1 font-mono">
+                                                <ArrowDown size={10} className="text-emerald-500" /> {renderSpeed(wifiConfig.downloadSpeed)}
+                                              </span>
+                                              <span className="font-medium text-slate-700 dark:text-slate-300 ml-auto mr-3">{usagePercent}%</span>
+                                              <span className="text-slate-500 flex items-center gap-1 font-mono">
+                                                <ArrowUp size={10} className="text-indigo-500" /> {renderSpeed(wifiConfig.uploadSpeed)}
+                                              </span>
+                                            </div>
+                                            <div className="w-full bg-slate-200 dark:bg-white/10 rounded-full h-1.5 overflow-hidden">
+                                              <div className={`h-1.5 rounded-full transition-all duration-500 ${usagePercent > 85 ? 'bg-rose-500' : usagePercent > 60 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.max(2, usagePercent)}%` }}></div>
+                                            </div>
+                                         </div>
+
+                                         <div className="flex items-center gap-2 justify-end sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                toast.info(`Bande passante limitée à 5 Mbps pour l'appareil ${log.device || ''}.`);
+                                              }}
+                                              className="p-2 text-amber-500 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 rounded-xl transition-colors border border-transparent hover:border-amber-200 dark:hover:border-amber-500/20 shadow-sm"
+                                              title="Limiter la vitesse"
+                                            >
+                                              <ArrowDown size={16} />
+                                            </button>
+                                            <button 
+                                              onClick={async () => {
+                                                try {
+                                                   const { doc, updateDoc } = await import('firebase/firestore');
+                                                   const { db } = await import('../firebase');
+                                                   await updateDoc(doc(db, 'connections', log.id), { status: 'Déconnecté' });
+                                                   toast.success(`Appareil ${log.device || ''} déconnecté.`);
+                                                } catch (err) {
+                                                   toast.error("Erreur de déconnexion");
+                                                }
+                                              }}
+                                              className="p-2 text-red-500 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/20 rounded-xl transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-500/20 shadow-sm"
+                                              title="Déconnecter"
+                                            >
+                                              <PowerOff size={16} />
+                                            </button>
+                                         </div>
+                                     </div>
+                                  );
+                               })
+                            )}
+                          </div>
+                        </div>
+                      </SortableWidget>
+                    );
+
                     return null;
                   })}
                 </div>
@@ -1324,6 +1533,87 @@ export default function Dashboard() {
                           <tr>
                             <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
                               Aucun voucher généré pour le moment.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                   </table>
+                 </div>
+                </div>
+              </div>
+            )}
+
+            {!isDataLoading && activeTab === 'discounts' && (
+              <div className="space-y-8">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Codes Promo</h2>
+                    <p className="text-slate-500 dark:text-slate-400">Créez des codes de réduction pour vos offres d'accès payantes (pourcentage ou montant fixe).</p>
+                  </div>
+                  <button
+                    onClick={() => setShowDiscountModal(true)}
+                    className="flex items-center gap-2 bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm shadow-lg shadow-pink-500/30"
+                  >
+                    <Plus size={18} />
+                    Nouveau Code Promo
+                  </button>
+                </div>
+
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm overflow-hidden flex flex-col">
+                 <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5">
+                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Codes actifs et passés</h3>
+                 </div>
+                 <div className="overflow-x-auto">
+                   <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02]">
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Code</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Réduction</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Utilisations</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Statut</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Établissement</th>
+                          <th className="px-6 py-4 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider uppercase">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {discounts.map((discount) => (
+                          <tr key={discount.id} className="border-b border-slate-100 dark:border-white/5 hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className="font-mono bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-2 py-1 rounded hidden sm:inline-block font-semibold">
+                                {discount.code}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300 font-medium">
+                              {discount.type === 'percentage' ? `${discount.value}%` : `${discount.value}€`}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 dark:text-slate-300">
+                               {discount.uses} / {discount.maxUses ? discount.maxUses : '∞'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${discount.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400'}`}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${discount.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                                {discount.status === 'active' ? 'Actif' : 'Inactif'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
+                              {locations.find(l => l.id === discount.locationId)?.name || 'Tous'}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                              {discount.status === 'active' && (
+                                <button
+                                  onClick={() => handleRevokeDiscount(discount.id)}
+                                  className="text-red-500 hover:text-red-600 font-medium"
+                                >
+                                  Désactiver
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                        {discounts.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                              Aucun code promo créé pour le moment.
                             </td>
                           </tr>
                         )}
@@ -1572,7 +1862,7 @@ export default function Dashboard() {
                   </div>
                   <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={REDEMPTION_DATA} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={8}>
+                      <BarChart data={dynamicRedemptionData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={8}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff1a" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dx={-10} />
@@ -1696,6 +1986,14 @@ export default function Dashboard() {
                             >
                               <Palette size={18} />
                             </button>
+                            <button
+                              onClick={() => handleConnectStripe(loc.id)}
+                              disabled={isConnectingStripe === loc.id || loc.stripeAccountId}
+                              className={`p-2 rounded-lg transition-colors ${loc.stripeAccountId ? 'text-green-500 bg-green-50 dark:bg-green-500/10 cursor-default' : 'text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/20'}`}
+                              title={loc.stripeAccountId ? "Stripe Connecté" : "Connecter Stripe"}
+                            >
+                              {isConnectingStripe === loc.id ? <div className="w-4 h-4 border-2 border-blue-500/30 border-t-blue-500 animate-spin rounded-full"></div> : <DollarSign size={18} />}
+                            </button>
                           </div>
                         </div>
                         <div className="flex items-start justify-between">
@@ -1723,6 +2021,73 @@ export default function Dashboard() {
                   </div>
                 </SortableContext>
               </DndContext>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!isDataLoading && activeTab === 'branding' && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Venue Branding</h2>
+                  <p className="text-slate-500 dark:text-slate-400">Personnalisez votre portail captif pour chaque établissement, ajoutez votre logo et choisissez vos couleurs.</p>
+                </div>
+                
+                {locations.length === 0 ? (
+                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-12 text-center flex flex-col items-center">
+                     <div className="w-16 h-16 bg-slate-100 dark:bg-white/10 rounded-full flex items-center justify-center mb-4">
+                       <MapPin className="text-slate-400" size={24} />
+                     </div>
+                     <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Aucun établissement</h3>
+                     <p className="text-slate-500 max-w-md mx-auto mb-6">Ajoutez d'abord un établissement depuis l'onglet "Établissements" pour configurer son portail captif.</p>
+                   </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {locations.map((loc) => (
+                      <div key={loc.id} className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl overflow-hidden hover:shadow-xl transition-all hover:border-pink-500/30 group">
+                        <div className="p-6">
+                          <div className="flex items-center gap-4 mb-4">
+                            <div className="w-16 h-16 rounded-2xl border border-slate-200 dark:border-white/10 overflow-hidden bg-slate-50 shrink-0 flex items-center justify-center relative">
+                               {loc.portalConfig?.logoUrl ? (
+                                 <img src={loc.portalConfig.logoUrl} alt="Logo" className="w-full h-full object-contain p-1" />
+                               ) : (
+                                 <ImageIcon className="text-slate-300" size={24} />
+                               )}
+                               <div 
+                                 className="absolute right-0 bottom-0 w-4 h-4 rounded-tl-lg" 
+                                 style={{ backgroundColor: loc.portalConfig?.themeColor || '#6366f1' }}
+                               ></div>
+                            </div>
+                            <div>
+                               <h3 className="font-bold text-slate-900 dark:text-white line-clamp-1">{loc.name}</h3>
+                               <p className="text-sm font-medium text-slate-500">{loc.portalConfig?.layoutTheme || 'default'} theme</p>
+                            </div>
+                          </div>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 h-10 mb-6 italic">
+                             "{loc.portalConfig?.welcomeMessage || 'Message de bienvenue...'}"
+                          </p>
+                          <button 
+                            onClick={() => {
+                              setCurrentLocationForPortal(loc);
+                              setPortalConfigPreview({
+                                themeColor: loc.portalConfig?.themeColor || '#6366f1',
+                                logoUrl: loc.portalConfig?.logoUrl || '',
+                                welcomeMessage: loc.portalConfig?.welcomeMessage || '',
+                                termsOfService: loc.portalConfig?.termsOfService || '',
+                                layoutTheme: loc.portalConfig?.layoutTheme || 'default',
+                                sessionDuration: loc.portalConfig?.sessionDuration || 60,
+                                allowExtension: loc.portalConfig?.allowExtension || false,
+                                redirectUrl: loc.portalConfig?.redirectUrl || ''
+                              });
+                              setShowPortalConfigModal(true);
+                            }}
+                            className="w-full flex items-center justify-center gap-2 bg-pink-50 text-pink-600 dark:bg-pink-500/10 dark:text-pink-400 hover:bg-pink-100 dark:hover:bg-pink-500/20 py-3 rounded-xl text-sm font-semibold transition-colors"
+                          >
+                            <Palette size={18} /> Personnaliser
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -1772,20 +2137,44 @@ export default function Dashboard() {
                     </div>
 
                     {/* Bandwidth Cap */}
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Plafond de Bande Passante (Vitesse)</label>
-                      <select 
-                        value={wifiConfig.bandwidth}
-                        onChange={(e) => setWifiConfig({ ...wifiConfig, bandwidth: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
-                      >
-                        <option value="unlimited">Illimitée</option>
-                        <option value="5">5 Mbps (Basique)</option>
-                        <option value="10">10 Mbps (Standard)</option>
-                        <option value="25">25 Mbps (HD Video)</option>
-                        <option value="50">50 Mbps (Premium)</option>
-                      </select>
-                      <p className="mt-2 text-xs text-slate-500">Limite la vitesse maximale par appareil pour éviter la congestion.</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-2">
+                          <ArrowDown size={14} className="text-indigo-500" />
+                          Vitesse de Téléchargement (Download)
+                        </label>
+                        <select 
+                          value={wifiConfig.downloadSpeed}
+                          onChange={(e) => setWifiConfig({ ...wifiConfig, downloadSpeed: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        >
+                          <option value="unlimited">Illimitée</option>
+                          <option value="5">5 Mbps</option>
+                          <option value="10">10 Mbps</option>
+                          <option value="25">25 Mbps</option>
+                          <option value="50">50 Mbps</option>
+                          <option value="100">100 Mbps</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-2">
+                          <ArrowUp size={14} className="text-indigo-500" />
+                          Vitesse d'Envoi (Upload)
+                        </label>
+                        <select 
+                          value={wifiConfig.uploadSpeed}
+                          onChange={(e) => setWifiConfig({ ...wifiConfig, uploadSpeed: e.target.value })}
+                          className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        >
+                          <option value="unlimited">Illimitée</option>
+                          <option value="5">5 Mbps</option>
+                          <option value="10">10 Mbps</option>
+                          <option value="25">25 Mbps</option>
+                          <option value="50">50 Mbps</option>
+                          <option value="100">100 Mbps</option>
+                        </select>
+                      </div>
+                      <p className="sm:col-span-2 mt-1 text-xs text-slate-500">Limitez la bande passante maximale (données entrantes et sortantes) par appareil pour assurer une distribution équitable.</p>
                     </div>
                   </div>
                   
@@ -2034,6 +2423,12 @@ export default function Dashboard() {
                         Quotidien
                       </button>
                       <button 
+                        onClick={() => setAdsRevenueTimeframe('weekly')}
+                        className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${adsRevenueTimeframe === 'weekly' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                      >
+                        Hebdo
+                      </button>
+                      <button 
                         onClick={() => setAdsRevenueTimeframe('monthly')}
                         className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${adsRevenueTimeframe === 'monthly' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
                       >
@@ -2044,7 +2439,7 @@ export default function Dashboard() {
                   <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart 
-                        data={adsRevenueTimeframe === 'daily' ? dynamicRevenueDaily : dynamicRevenueMonthly} 
+                        data={adsRevenueTimeframe === 'daily' ? dynamicRevenueDaily : (adsRevenueTimeframe === 'weekly' ? dynamicRevenueWeekly : dynamicRevenueMonthly)} 
                         margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff1a" />
@@ -2746,13 +3141,22 @@ export default function Dashboard() {
                 
                 {/* Customization Section */}
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-8 backdrop-blur-md shadow-sm">
-                  <h3 className="font-semibold text-lg text-slate-900 dark:text-white mb-6 flex items-center gap-2">
-                    <Smartphone className="text-indigo-400" size={20} />
-                    Personnalisation du Portail
-                  </h3>
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                      <Smartphone className="text-indigo-400" size={20} />
+                      Personnalisation du Portail
+                    </h3>
+                    <button 
+                      onClick={() => setShowMobilePreview(!showMobilePreview)}
+                      className="lg:hidden flex items-center gap-2 text-sm font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      {showMobilePreview ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showMobilePreview ? 'Cacher l\'aperçu' : 'Aperçu en Direct'}
+                    </button>
+                  </div>
                   
-                  <div className="flex flex-col md:flex-row gap-8">
-                     <div className="flex-1 space-y-8">
+                  <div className="flex flex-col lg:flex-row gap-8">
+                     <div className={`flex-1 space-y-8 ${showMobilePreview ? 'hidden lg:block' : 'block'}`}>
                        {/* Logo Upload */}
                        <div>
                           <h4 className="font-medium text-slate-900 dark:text-white mb-2">Logo de l'établissement</h4>
@@ -2772,8 +3176,16 @@ export default function Dashboard() {
                                   className="hidden" 
                                   onChange={(e) => {
                                     if(e.target.files && e.target.files[0]) {
-                                      const url = URL.createObjectURL(e.target.files[0]);
-                                      setPortalConfig(prev => ({...prev, logoUrl: url}));
+                                      const file = e.target.files[0];
+                                      if (file.size > 1024 * 512) {
+                                        alert("L'image est trop volumineuse. Veuillez choisir une image de moins de 500 Ko.");
+                                        return;
+                                      }
+                                      const reader = new FileReader();
+                                      reader.onloadend = () => {
+                                        setPortalConfig(prev => ({...prev, logoUrl: reader.result as string}));
+                                      };
+                                      reader.readAsDataURL(file);
                                     }
                                   }}
                                 />
@@ -2788,8 +3200,9 @@ export default function Dashboard() {
                                     input.accept = 'image/*';
                                     input.onchange = (e: any) => {
                                       if(e.target.files && e.target.files[0]) {
-                                        const url = URL.createObjectURL(e.target.files[0]);
-                                        setPortalConfig(prev => ({...prev, logoUrl: url}));
+                                        const file = e.target.files[0];
+                                        if (file.size > 1024 * 512) return alert("L'image est trop volumineuse.");
+                                        const r = new FileReader(); r.onloadend = () => setPortalConfig(prev => ({...prev, logoUrl: r.result as string})); r.readAsDataURL(file);
                                       }
                                     };
                                     input.click();
@@ -2876,12 +3289,12 @@ export default function Dashboard() {
                     </div>
                     
                     {/* Live Preview (mini) */}
-                    <div className="shrink-0 hidden lg:block">
+                    <div className={`shrink-0 ${showMobilePreview ? 'flex flex-col items-center w-full mt-8' : 'hidden lg:block'}`}>
                       <h4 className="font-medium text-slate-900 dark:text-white mb-4 flex items-center gap-2">
                         <Smartphone size={18} className="text-indigo-400" />
                         Aperçu en Direct
                       </h4>
-                      <div className="w-[280px] border border-slate-200 dark:border-white/10 rounded-[2rem] p-3 bg-slate-50 dark:bg-white/5 relative shadow-inner h-[500px]">
+                      <div className="w-[280px] md:w-[320px] border border-slate-200 dark:border-white/10 rounded-[2rem] p-3 bg-slate-50 dark:bg-white/5 relative shadow-inner h-[600px] shrink-0">
                         <div className="w-full h-full bg-[#050614] rounded-[1.5rem] overflow-hidden relative border border-white/5 flex flex-col items-center p-6 text-center shadow-2xl">
                          <div className="absolute top-3 right-3 z-50">
                             <button 
@@ -3051,10 +3464,11 @@ export default function Dashboard() {
                           Tester la connexion
                         </button>
                         <button 
-                          onClick={() => toast.success('Paramètres SMTP enregistrés avec succès.')}
-                          className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/30 flex justify-center items-center gap-2"
+                          onClick={handleSaveWifiConfig}
+                          disabled={isSavingWifiConfig}
+                          className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-75 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/30 flex justify-center items-center gap-2"
                         >
-                          <CheckCircle2 size={18} />
+                          {isSavingWifiConfig ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <CheckCircle2 size={18} />}
                           Enregistrer
                         </button>
                       </div>
@@ -3343,17 +3757,43 @@ export default function Dashboard() {
                     
                     {/* Bandwidth Limit */}
                     <div>
-                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Limite de bande passante</h4>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Réduisez la vitesse du réseau par utilisateur pour éviter la saturation du réseau.</p>
-                      <div className="flex flex-wrap gap-4">
-                        {['unlimited', '5', '10', '25', '50'].map(bw => (
-                          <label key={bw} className={`flex items-center gap-2 px-4 py-2 rounded-xl border cursor-pointer transition-all ${wifiConfig.bandwidth === bw ? 'bg-indigo-500/20 border-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:bg-white/10'}`}>
-                            <input type="radio" name="bandwidth" value={bw} checked={wifiConfig.bandwidth === bw} onChange={() => setWifiConfig({...wifiConfig, bandwidth: bw})} className="hidden" />
-                            <span className="text-sm font-medium text-slate-900 dark:text-white">
-                              {bw === 'unlimited' ? 'Sans limite' : `${bw} Mbps`}
-                            </span>
+                      <h4 className="font-medium text-slate-900 dark:text-white mb-2">Plafond de Bande Passante (Vitesse)</h4>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Limitez la vitesse réseau par appareil pour éviter la saturation du point d'accès.</p>
+                      
+                      <div className="space-y-6">
+                        <div>
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                            <ArrowDown size={14} className="text-indigo-500" />
+                            Vitesse de Téléchargement (Download)
                           </label>
-                        ))}
+                          <div className="flex flex-wrap gap-2 sm:gap-4">
+                            {['unlimited', '5', '10', '25', '50', '100'].map(bw => (
+                              <label key={`dl-${bw}`} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border cursor-pointer transition-all ${wifiConfig.downloadSpeed === bw ? 'bg-indigo-500/20 border-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10'}`}>
+                                <input type="radio" name="downloadSpeed" value={bw} checked={wifiConfig.downloadSpeed === bw} onChange={() => setWifiConfig({...wifiConfig, downloadSpeed: bw})} className="hidden" />
+                                <span className="text-sm font-medium text-slate-900 dark:text-white">
+                                  {bw === 'unlimited' ? 'Illimité' : `${bw} Mbps`}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                            <ArrowUp size={14} className="text-indigo-500" />
+                            Vitesse d'Envoi (Upload)
+                          </label>
+                          <div className="flex flex-wrap gap-2 sm:gap-4">
+                            {['unlimited', '5', '10', '25', '50', '100'].map(bw => (
+                              <label key={`ul-${bw}`} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl border cursor-pointer transition-all ${wifiConfig.uploadSpeed === bw ? 'bg-indigo-500/20 border-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10'}`}>
+                                <input type="radio" name="uploadSpeed" value={bw} checked={wifiConfig.uploadSpeed === bw} onChange={() => setWifiConfig({...wifiConfig, uploadSpeed: bw})} className="hidden" />
+                                <span className="text-sm font-medium text-slate-900 dark:text-white">
+                                  {bw === 'unlimited' ? 'Illimité' : `${bw} Mbps`}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3656,7 +4096,7 @@ export default function Dashboard() {
             </button>
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Échanger des points</h3>
             {(() => {
-              const user = users.find(u => u.id === redeemModal.userId);
+              const user = dynamicCrmUsers.find(u => u.id === redeemModal.userId);
               if (!user) return null;
               return (
                 <>
@@ -4036,6 +4476,91 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Discount Modal */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 top-rounded-3xl">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Gift className="text-pink-500" size={24} /> Nouveau Code Promo
+              </h3>
+              <button onClick={() => setShowDiscountModal(false)} className="text-slate-400 hover:text-slate-500">
+                <X size={24} />
+              </button>
+            </div>
+            <form onSubmit={handleGenerateDiscount} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Code Promo (ex: ETE20)</label>
+                <input 
+                  type="text" 
+                  value={discountConfig.code}
+                  onChange={e => setDiscountConfig({...discountConfig, code: e.target.value})}
+                  maxLength={15}
+                  required
+                  placeholder="CODEPRO"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-pink-500 outline-none uppercase font-mono" 
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Type</label>
+                  <select 
+                    value={discountConfig.type}
+                    onChange={e => setDiscountConfig({...discountConfig, type: e.target.value as 'percentage' | 'flat'})}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-pink-500 outline-none"
+                  >
+                    <option value="percentage">Pourcentage (%)</option>
+                    <option value="flat">Montant Fixe (€)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Valeur</label>
+                  <input type="number" required
+                    value={discountConfig.value}
+                    onChange={e => setDiscountConfig({...discountConfig, value: Number(e.target.value)})}
+                    min="1" max={discountConfig.type === 'percentage' ? 100 : 1000} 
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-pink-500 outline-none" 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Utilisations max (0 = illimité)</label>
+                <input type="number" required
+                  value={discountConfig.maxUses}
+                  onChange={e => setDiscountConfig({...discountConfig, maxUses: Number(e.target.value)})}
+                  min="0"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-pink-500 outline-none" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Établissement</label>
+                <select required 
+                  value={discountConfig.locationId}
+                  onChange={e => setDiscountConfig({...discountConfig, locationId: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-pink-500 outline-none"
+                >
+                  <option value="" disabled>Sélectionner un établissement</option>
+                  {locations.map(loc => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button type="button" onClick={() => setShowDiscountModal(false)} className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                  Annuler
+                </button>
+                <button type="submit" disabled={isGeneratingDiscount} className="flex-1 py-2 rounded-xl bg-pink-500 text-white font-medium hover:bg-pink-600 transition-colors shadow-lg shadow-pink-500/20 disabled:opacity-50">
+                  {isGeneratingDiscount ? 'Création...' : 'Créer le code'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Location Modal */}
       {showLocationModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -4133,17 +4658,29 @@ export default function Dashboard() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-5xl overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl my-4 md:my-8 flex flex-col md:flex-row h-auto md:h-[800px]">
             {/* Editor Side */}
-            <div className="w-full md:w-1/2 flex flex-col h-full overflow-y-auto md:border-r border-slate-100 dark:border-white/5 relative">
+            <div className={`w-full md:w-1/2 flex-col h-full overflow-y-auto md:border-r border-slate-100 dark:border-white/5 relative ${showMobilePreview ? 'hidden md:flex' : 'flex'}`}>
               <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 sticky top-0 z-10">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Palette size={20} className="text-pink-500" /> Personnaliser le Portail
                 </h3>
-                <button 
-                  onClick={() => setShowPortalConfigModal(false)}
-                  className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm"
-                >
-                  <X size={18} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setShowMobilePreview(true)}
+                    className="md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <Smartphone size={16} /> Aperçu Live
+                  </button>
+                  <button 
+                    onClick={() => {
+                        setShowPortalConfigModal(false);
+                        setShowMobilePreview(false);
+                    }}
+                    className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
               
               <form onSubmit={handleSavePortalConfig} className="p-6 space-y-6 flex-1 flex flex-col">
@@ -4234,15 +4771,58 @@ export default function Dashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL du Logo (Optionnel)</label>
-                  <input 
-                    type="url" 
-                    name="logoUrl"
-                    value={portalConfigPreview.logoUrl}
-                    onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, logoUrl: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
-                    placeholder="https://example.com/logo.png"
-                  />
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Logo du portail</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                      <input 
+                        type="url" 
+                        name="logoUrl"
+                        value={portalConfigPreview.logoUrl}
+                        onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, logoUrl: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
+                        placeholder="https://example.com/logo.png"
+                      />
+                    </div>
+                    <div className="relative shrink-0 flex">
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 1024 * 512) {
+                              alert("L'image est trop volumineuse. Veuillez choisir une image de moins de 500 Ko.");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setPortalConfigPreview({ ...portalConfigPreview, logoUrl: reader.result as string });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <button type="button" className="bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-700 dark:text-slate-300 px-6 py-3 rounded-xl transition-colors font-medium flex items-center gap-2 h-[48px] w-full sm:w-auto justify-center">
+                        <Upload size={18} />
+                        Uploader
+                      </button>
+                    </div>
+                  </div>
+                  {portalConfigPreview.logoUrl && (
+                    <div className="mt-4 flex items-center gap-4 p-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl">
+                       <div className="relative w-16 h-16 rounded-xl border border-slate-200 dark:border-white/10 bg-white shadow-sm flex items-center justify-center p-2 shrink-0">
+                          <img src={portalConfigPreview.logoUrl} alt="Logo preview" className="max-w-full max-h-full object-contain" />
+                       </div>
+                       <div className="flex-1 min-w-0">
+                         <p className="text-sm font-medium text-slate-900 dark:text-white truncate">Logo actuel</p>
+                         <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{portalConfigPreview.logoUrl.startsWith('data:') ? 'Image uploadée localement' : portalConfigPreview.logoUrl}</p>
+                       </div>
+                       <button type="button" onClick={() => setPortalConfigPreview({...portalConfigPreview, logoUrl: ''})} className="shrink-0 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors" title="Supprimer">
+                         <Trash2 size={18}/>
+                       </button>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -4355,8 +4935,17 @@ export default function Dashboard() {
             </div>
 
             {/* Preview Side */}
-            <div className="w-full md:w-1/2 relative hidden md:flex flex-col items-center justify-center p-8 bg-slate-200/50 dark:bg-[#02030a] overflow-y-auto">
-                <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl shadow-sm mb-6 shrink-0">
+            <div className={`w-full md:w-1/2 relative flex-col items-center justify-center p-8 bg-slate-200/50 dark:bg-[#02030a] overflow-y-auto ${showMobilePreview ? 'flex' : 'hidden md:flex'}`}>
+                {showMobilePreview && (
+                  <button 
+                    type="button"
+                    onClick={() => setShowMobilePreview(false)}
+                    className="absolute top-6 left-6 md:hidden flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium shadow-sm border border-slate-200 dark:border-white/10 z-50 transition-transform active:scale-95"
+                  >
+                    <Palette size={16} /> Retour à l'éditeur
+                  </button>
+                )}
+                <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl shadow-sm mb-6 shrink-0 mt-12 md:mt-0">
                   <button 
                     type="button"
                     onClick={() => setPreviewDeviceSize('sm')}
