@@ -1,14 +1,113 @@
-import { useState } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, Mail, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 export default function CaptivePortal() {
+  const [searchParams] = useSearchParams();
+  const locationId = searchParams.get('locationId');
+  
   const [step, setStep] = useState<'home' | 'ad' | 'success' | 'payment'>('home');
   const [adProgress, setAdProgress] = useState(0);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  
+  const [locationName, setLocationName] = useState('Le Café Central');
+  const [portalConfig, setPortalConfig] = useState<any>(null);
+  const [locationOwnerId, setLocationOwnerId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  useEffect(() => {
+    const fetchLocation = async () => {
+      // payment handling check
+      if (searchParams.get('payment_success') === 'true') {
+         setStep('success');
+         // We do not run simulate ad, we manually log it.
+         if (locationId) {
+            try {
+              const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+              const { db } = await import('../firebase');
+              const ua = navigator.userAgent;
+              let os = "Inconnu";
+              let deviceType = "Appareil";
+              if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+              else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+              else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+              
+              if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+              else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+              else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+
+              await addDoc(collection(db, 'connections'), {
+                locationId,
+                locationName: 'Location Paid',
+                userId: null,
+                device: deviceType,
+                os,
+                duration: 120, // 2H premium
+                connectedAt: serverTimestamp(),
+                status: 'Connecté'
+              });
+            } catch (err) {
+              console.error("Failed to log connection:", err);
+            }
+         }
+      }
+
+      if (!locationId) {
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        const docRef = doc(db, 'locations', locationId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setLocationName(data.name || 'Le Café Central');
+          if (data.userId) {
+            setLocationOwnerId(data.userId);
+          }
+          if (data.portalConfig) {
+            setPortalConfig(data.portalConfig);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching location for portal:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchLocation();
+  }, [locationId, searchParams]);
+
+  const handleCheckout = async (priceAmount: number, passName: string) => {
+    setIsProcessingPayment(true);
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceAmount, passName, locationId })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Erreur lors de la création de la session de paiement');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erreur inconnue');
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
 
   const simulateAd = () => {
     setStep('ad');
@@ -18,10 +117,63 @@ export default function CaptivePortal() {
       setAdProgress(progress);
       if (progress >= 100) {
         clearInterval(interval);
-        setTimeout(() => setStep('success'), 500);
+        setTimeout(async () => {
+          setStep('success');
+          if (locationId) {
+            try {
+              const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+              const { db } = await import('../firebase');
+              const ua = navigator.userAgent;
+              let os = "Inconnu";
+              let deviceType = "Appareil";
+              if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+              else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+              else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+              
+              if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+              else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+              else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+
+              await addDoc(collection(db, 'connections'), {
+                locationId,
+                locationName,
+                userId: locationOwnerId,
+                device: deviceType,
+                os,
+                duration: portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60,
+                connectedAt: serverTimestamp(),
+                status: 'Connecté'
+              });
+            } catch (err) {
+              console.error("Failed to log connection:", err);
+            }
+          }
+        }, 500);
       }
     }, 500);
   };
+
+  const activeThemeColor = portalConfig?.themeColor || '#6366f1';
+  const layoutTheme = portalConfig?.layoutTheme || 'default';
+  const logoUrl = portalConfig?.logoUrl;
+  const welcomeMessage = portalConfig?.welcomeMessage || `Bienvenue au ${locationName}`;
+  const termsOfService = portalConfig?.termsOfService;
+  const sessionDuration = portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60;
+  const redirectUrl = portalConfig?.redirectUrl;
+
+  const handleSuccessClickAndRedirect = () => {
+    if (redirectUrl) {
+      window.location.href = redirectUrl;
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-[#050614] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#050614] font-sans text-slate-900 dark:text-white relative overflow-hidden flex items-center justify-center p-4">
@@ -54,109 +206,87 @@ export default function CaptivePortal() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-col h-full"
+                className={`flex-1 overflow-y-auto flex relative p-6 pt-16 h-full ${layoutTheme === 'modern' ? 'flex-col justify-end pb-8' : 'flex-col items-center'} ${layoutTheme === 'elegant' ? 'bg-slate-900 text-slate-100 font-serif' : 'bg-[#f8fafc] text-slate-900'}`}
               >
-                {/* Header Image */}
-                <div className="h-48 bg-slate-200 relative">
-                  <img 
-                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&q=80&w=600" 
-                    alt="Cafe interior" 
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0b0c21] via-[#0b0c21]/80 to-transparent"></div>
-                  <div className="absolute bottom-4 left-6 right-6">
-                    <h2 className="text-slate-900 dark:text-white text-2xl font-bold">Le Café Central</h2>
-                    <p className="text-slate-600 dark:text-slate-300 text-sm flex items-center gap-1 mt-1">
-                      <Wifi size={14} className="text-indigo-400" /> WiFiCash Network
+                {layoutTheme === 'modern' && logoUrl && (
+                  <div className="absolute inset-0 opacity-20 bg-cover bg-center" style={{ backgroundImage: `url(${logoUrl})`, filter: 'blur(10px)' }}></div>
+                )}
+                
+                <div className={`w-full relative z-10 flex flex-col ${layoutTheme === 'modern' ? 'bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-xl' : layoutTheme === 'minimal' ? 'items-center flex-1 justify-center' : 'items-center'}`}>
+                  {layoutTheme !== 'modern' && (
+                    <>
+                      {logoUrl ? (
+                         <img src={logoUrl} alt="Logo" className={`object-contain mb-8 ${layoutTheme === 'minimal' ? 'w-32 h-32' : 'w-24 h-24 rounded-2xl shadow-sm bg-white'}`} style={layoutTheme === 'elegant' ? { borderRadius: '50%' } : {}} />
+                      ) : (
+                         <div className={`bg-white rounded-2xl shadow-sm flex items-center justify-center mb-8 border border-slate-100 ${layoutTheme === 'minimal' ? 'w-32 h-32' : 'w-24 h-24'}`} style={layoutTheme === 'elegant' ? { borderRadius: '50%', backgroundColor: '#1e293b', borderColor: '#334155' } : {}}>
+                            <Wifi className={layoutTheme === 'elegant' ? 'text-slate-400' : 'text-slate-300'} size={40} />
+                         </div>
+                      )}
+                    </>
+                  )}
+
+                  {layoutTheme === 'modern' && logoUrl && (
+                     <img src={logoUrl} alt="Logo" className="w-16 h-16 object-contain mb-6 rounded-2xl bg-white shadow-sm self-start" />
+                  )}
+
+                  <h2 className={`text-xl font-bold text-center mb-3 ${layoutTheme === 'elegant' ? 'text-white font-serif text-2xl tracking-wide' : 'text-slate-900'} ${layoutTheme === 'modern' ? 'text-left' : ''}`}>
+                    {welcomeMessage}
+                  </h2>
+
+                  {layoutTheme !== 'minimal' && (
+                    <p className={`text-center text-sm mb-8 ${layoutTheme === 'elegant' ? 'text-slate-400' : 'text-slate-500'} ${layoutTheme === 'modern' ? 'text-left mb-6' : ''}`}>
+                       {sessionDuration > 0 ? `Connectez-vous pour profiter de ${sessionDuration >= 60 ? Math.floor(sessionDuration/60) + 'h' + (sessionDuration%60 > 0 ? (sessionDuration%60).toString() : '') : sessionDuration + ' min'} de Wi-Fi gratuit.` : "Connectez-vous pour accéder au Wi-Fi gratuit."}
                     </p>
-                  </div>
-                </div>
+                  )}
 
-                <div className="flex-1 p-6 flex flex-col overflow-y-auto pb-8">
-                  <div className="mb-6">
-                    <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-2">Bon retour, Alex ! 👋</h3>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Vous avez accumulé <span className="text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded-md">120 points</span>. Choisissez votre accès :</p>
-                  </div>
+                  <button 
+                     onClick={simulateAd}
+                     type="button"
+                     style={{ backgroundColor: activeThemeColor }}
+                     className={`w-full py-4 text-white font-bold text-lg shadow-lg mb-6 transition-transform hover:opacity-90 active:scale-95 ${layoutTheme === 'elegant' ? 'rounded-md uppercase tracking-wider text-sm shadow-black/50' : 'rounded-xl'}`}
+                  >
+                     {layoutTheme === 'minimal' ? 'Connexion Automatique' : 'Se connecter gratuitement'}
+                  </button>
 
-                  {/* Options */}
-                  <div className="space-y-4 mb-8">
-                    {/* Free Option */}
-                    <button 
-                      onClick={simulateAd}
-                      className="w-full flex items-center p-4 border border-indigo-500/30 bg-indigo-500/10 rounded-2xl hover:bg-indigo-500/20 transition-colors group relative overflow-hidden backdrop-blur-sm"
-                    >
-                      <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">
-                        POPULAIRE
-                      </div>
-                      <div className="flex-1 text-left">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-bold text-indigo-300">30 min Gratuites</h4>
-                        </div>
-                        <p className="text-xs text-indigo-200/70">10 sec de publicité</p>
-                      </div>
-                      <PlayCircle size={28} className="text-indigo-400 group-hover:scale-110 transition-transform" />
-                    </button>
-
-                    {/* Loyalty Option */}
-                    <button 
-                      onClick={() => setStep('success')}
-                      className="w-full flex items-center p-4 border border-indigo-500/50 bg-indigo-500/20 rounded-2xl hover:bg-indigo-500/30 transition-colors backdrop-blur-sm relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg shadow-sm">
-                        FIDÉLITÉ
-                      </div>
-                      <div className="flex-1 text-left">
-                         <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-bold text-slate-900 dark:text-white">Premium 2 Heures</h4>
-                        </div>
-                        <p className="text-xs text-indigo-300">Offert pour votre fidélité</p>
-                      </div>
-                      <div className="font-bold text-lg text-indigo-300 flex items-center gap-1 bg-indigo-500/10 px-2 py-1 rounded-lg">
-                        50 <Sparkles size={14} />
-                      </div>
-                    </button>
-
-                    {/* Paid Option */}
-                    <button 
-                      onClick={() => setStep('payment')}
-                      className="w-full flex items-center p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 rounded-2xl hover:bg-white/10 transition-colors backdrop-blur-sm"
-                    >
-                      <div className="flex-1 text-left">
-                         <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-bold text-slate-900 dark:text-white">Premium 2 Heures</h4>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Haut débit sans pub</p>
-                      </div>
-                      <div className="font-bold text-lg text-slate-900 dark:text-white px-3 py-1 bg-white/10 rounded-lg">2 €</div>
-                    </button>
-                    
-                    {/* Paid Option */}
-                    <button 
-                      onClick={() => setStep('payment')}
-                      className="w-full flex items-center p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 rounded-2xl hover:bg-white/10 transition-colors backdrop-blur-sm"
-                    >
-                      <div className="flex-1 text-left">
-                         <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-bold text-slate-900 dark:text-white">Pass Journée</h4>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Illimité 24h</p>
-                      </div>
-                      <div className="font-bold text-lg text-slate-900 dark:text-white px-3 py-1 bg-white/10 rounded-lg">5 €</div>
-                    </button>
-                  </div>
-
+                  {portalConfig?.allowExtension && (
+                    <div className="w-full space-y-3 mb-6">
+                      <button 
+                        onClick={() => handleCheckout(200, "Premium 2 Heures")}
+                        disabled={isProcessingPayment}
+                        className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
+                      >
+                       <div className="text-left">
+                          <p className="font-bold text-sm">Premium 2 Heures</p>
+                          <p className="text-xs text-slate-500 opacity-80">Haut débit sans publicité</p>
+                       </div>
+                       <div className="font-bold">2.00 €</div>
+                      </button>
+                      <button 
+                        onClick={() => handleCheckout(500, "Pass Journée")}
+                        disabled={isProcessingPayment}
+                        className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
+                      >
+                       <div className="text-left">
+                          <p className="font-bold text-sm">Pass Journée</p>
+                          <p className="text-xs text-slate-500 opacity-80">Accès illimité 24h</p>
+                       </div>
+                       <div className="font-bold">5.00 €</div>
+                      </button>
+                    </div>
+                  )}
+                  
                   {/* Social Login info */}
-                  <div className="mt-auto">
+                  <div className="w-full">
                     <div className="relative flex items-center py-4">
                       <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
-                      <span className="flex-shrink-0 mx-4 text-slate-500 text-xs">Ou se connecter avec</span>
+                      <span className="flex-shrink-0 mx-4 text-slate-500 text-xs text-opacity-50">Ou se connecter avec</span>
                       <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
                     </div>
                     <div className="flex gap-4 max-w-[200px] mx-auto">
-                      <button className="flex-1 p-3 flex justify-center items-center rounded-xl bg-[#1877F2]/20 border border-[#1877F2]/30 text-[#1877F2] hover:bg-[#1877F2]/30 transition-colors">
+                      <button onClick={simulateAd} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/30 text-[#1877F2] hover:bg-[#1877F2]/20 transition-colors">
                         <Facebook size={20} />
                       </button>
-                      <button className="flex-1 p-3 flex justify-center items-center rounded-xl bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white hover:bg-white/10 transition-colors">
+                      <button onClick={simulateAd} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
                         <svg className="w-5 h-5" viewBox="0 0 24 24">
                           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -165,6 +295,14 @@ export default function CaptivePortal() {
                         </svg>
                       </button>
                     </div>
+                  </div>
+
+                  <div className={`text-xs w-full text-center ${layoutTheme === 'elegant' ? 'text-slate-500 mt-8' : 'text-slate-400'} ${layoutTheme === 'modern' ? 'mt-2' : 'mt-auto pt-8 pb-4'}`}>
+                      {termsOfService ? (
+                          <p className="whitespace-pre-line">{termsOfService}</p>
+                      ) : (
+                          <p>En vous connectant, vous acceptez les conditions générales d'utilisation de ce réseau.</p>
+                      )}
                   </div>
                 </div>
               </motion.div>
@@ -231,13 +369,25 @@ export default function CaptivePortal() {
                 <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">Connecté !</h2>
                 <p className="text-indigo-200 font-medium px-4 relative z-10 text-sm">Vous avez désormais accès à Internet.</p>
                 
-                <div className="mt-8 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
-                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Temps restant</p>
-                  <p className="text-3xl font-bold text-slate-900 dark:text-white">29:59</p>
-                </div>
+                {sessionDuration > 0 && (
+                  <div className="mt-8 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Temps restant</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{sessionDuration}:00</p>
+                  </div>
+                )}
+                
+                {redirectUrl && (
+                  <button 
+                    onClick={handleSuccessClickAndRedirect}
+                    style={{ backgroundColor: activeThemeColor }}
+                    className="w-full py-3 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/20 mb-6 relative z-10 hover:opacity-90 active:scale-95"
+                  >
+                    Continuer vers le site
+                  </button>
+                )}
 
                 {!feedbackSubmitted ? (
-                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md mb-6">
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md mb-6 mt-auto">
                     <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Comment évaluez-vous votre expérience ?</p>
                     <div className="flex justify-center gap-2 mb-4">
                       {[1, 2, 3, 4, 5].map((star) => (

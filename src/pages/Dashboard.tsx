@@ -104,6 +104,38 @@ export default function Dashboard() {
   const [overviewTimeframe, setOverviewTimeframe] = useState<'daily' | 'monthly'>('daily');
   const [analyticsTimeframe, setAnalyticsTimeframe] = useState<'daily' | 'monthly'>('monthly');
   const [isDataLoading, setIsDataLoading] = useState(true);
+  const [isSavingWifiConfig, setIsSavingWifiConfig] = useState(false);
+
+  const handleSaveWifiConfig = async () => {
+    if (!user || locations.length === 0) return;
+    setIsSavingWifiConfig(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const primaryLocation = locations[0];
+      const docRef = doc(db, 'locations', primaryLocation.id);
+      
+      await setDoc(docRef, {
+        wifiConfig: wifiConfig,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      
+      toast.success("Configuration Wi-Fi enregistrée!");
+      
+      // Update local state copy
+      setLocations(prev => prev.map(loc => 
+        loc.id === primaryLocation.id 
+          ? { ...loc, wifiConfig } 
+          : loc
+      ));
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Erreur lors de l'enregistrement de la configuration Wi-Fi.");
+    } finally {
+      setIsSavingWifiConfig(false);
+    }
+  };
 
   // DnD configuration
   const sensors = useSensors(
@@ -151,6 +183,7 @@ export default function Dashboard() {
 
   // Locations state
   const [locations, setLocations] = useState<any[]>([]);
+  const [connections, setConnections] = useState<any[]>([]);
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
@@ -161,7 +194,7 @@ export default function Dashboard() {
   const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
   const [currentLocationForPortal, setCurrentLocationForPortal] = useState<any>(null);
   const [isSubmittingPortalConfig, setIsSubmittingPortalConfig] = useState(false);
-  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false });
+  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '' });
   const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [aiBrandPrompt, setAiBrandPrompt] = useState('');
   const [isGeneratingAiTheme, setIsGeneratingAiTheme] = useState(false);
@@ -184,11 +217,15 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    let unsubscribeConnections: (() => void) | undefined;
     async function fetchLocations() {
-      if (!user) return;
+      if (!user) {
+        setIsDataLoading(false);
+        return;
+      }
       setIsLoadingLocations(true);
       try {
-        const { collection, getDocs, query, where, orderBy } = await import('firebase/firestore');
+        const { collection, getDocs, query, where, orderBy, onSnapshot } = await import('firebase/firestore');
         const { db } = await import('../firebase');
         const q = query(
           collection(db, 'locations'),
@@ -201,8 +238,27 @@ export default function Dashboard() {
           ...doc.data(),
           // Mock heartbeat: Every second location is simulated offline for demonstration (> 5 mins)
           lastHeartbeat: Date.now() - (idx === 0 ? 30000 : 360000) 
-        }));
+        })) as any[];
         setLocations(locs);
+        if (locs.length > 0 && locs[0].wifiConfig) {
+          setWifiConfig(prev => ({ ...prev, ...locs[0].wifiConfig }));
+        }
+
+        const connectionsQuery = query(
+          collection(db, 'connections'),
+          where('userId', '==', user.uid),
+          orderBy('connectedAt', 'desc')
+        );
+        unsubscribeConnections = onSnapshot(connectionsQuery, (snapshot) => {
+           const logData = snapshot.docs.map(doc => ({
+             id: doc.id,
+             ...doc.data()
+           }));
+           setConnections(logData);
+        }, (error) => {
+           console.error("Error fetching connections logs in real-time:", error);
+        });
+
       } catch (err: any) {
         console.error("Failed to fetch locations:", err);
       } finally {
@@ -210,6 +266,11 @@ export default function Dashboard() {
       }
     }
     fetchLocations();
+    return () => {
+      if (unsubscribeConnections) {
+        unsubscribeConnections();
+      }
+    };
   }, [user]);
 
   const handleSaveLocation = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -314,7 +375,8 @@ export default function Dashboard() {
         termsOfService: termsOfService || null,
         layoutTheme: portalConfigPreview.layoutTheme || 'default',
         sessionDuration: portalConfigPreview.sessionDuration || 60,
-        allowExtension: portalConfigPreview.allowExtension || false
+        allowExtension: portalConfigPreview.allowExtension || false,
+        redirectUrl: portalConfigPreview.redirectUrl || null
       };
 
       await setDoc(docRef, {
@@ -499,6 +561,20 @@ export default function Dashboard() {
     return <Navigate to="/" replace />;
   }
 
+  const activeSessions = connections.filter(c => c.status === 'Connecté').length;
+  const uniqueDevices = new Set(connections.map(c => c.device || 'Inconnu')).size;
+  const avgSessionTime = connections.length > 0 
+    ? Math.round(connections.reduce((acc, curr) => acc + (curr.duration || 0), 0) / connections.length) 
+    : 0;
+
+  const dashboardStats = [
+    { label: 'Revenus Potentiels', value: `${activeSessions * 2} €`, trend: 'Basé sur sessions actives', trendColor: 'text-indigo-400' },
+    { label: 'Visiteurs Uniques', value: uniqueDevices.toString(), trend: 'Basé sur les appareils', trendColor: 'text-slate-500' },
+    { label: 'Sessions Wi-Fi Actives', value: activeSessions.toString(), trend: 'En temps réel', trendColor: 'text-green-400' },
+    { label: 'Temps Moyen', value: `${avgSessionTime} min`,  trend: 'Calculé sur toutes les sessions', trendColor: 'text-slate-500' },
+    { label: 'Satisfaction Client', value: '4.8/5', trend: 'Sur les avis reçus', trendColor: 'text-amber-500' },
+  ];
+
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-[#050614] text-slate-900 dark:text-white font-sans relative overflow-hidden">
       {/* Mesh Background Blobs */}
@@ -647,13 +723,7 @@ export default function Dashboard() {
               <>
                    {/* Stats Overview */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-              {[
-                { label: 'Revenus du jour', value: '1,245 €', trend: '+14% ce mois', trendColor: 'text-green-400' },
-                { label: 'Visiteurs Uniques', value: '842', trend: '+5% vs hier', trendColor: 'text-green-400' },
-                { label: 'Sessions Wi-Fi Actives', value: '56', trend: '+12% vs hier', trendColor: 'text-green-400' },
-                { label: 'Temps Moyen', value: '45 min',  trend: '-2 min vs moyenne', trendColor: 'text-slate-500' },
-                { label: 'Satisfaction Client', value: '4.8/5', trend: 'Sur 142 avis', trendColor: 'text-slate-500' },
-              ].map((stat, i) => (
+              {dashboardStats.map((stat, i) => (
                 <div key={i} className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
                   <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{stat.label}</p>
                   <p className="text-3xl lg:text-3xl font-bold flex items-center gap-2">
@@ -1262,7 +1332,8 @@ export default function Dashboard() {
                                   termsOfService: loc.portalConfig?.termsOfService || '',
                                   layoutTheme: loc.portalConfig?.layoutTheme || 'default',
                                   sessionDuration: loc.portalConfig?.sessionDuration || 60,
-                                  allowExtension: loc.portalConfig?.allowExtension || false
+                                  allowExtension: loc.portalConfig?.allowExtension || false,
+                                  redirectUrl: loc.portalConfig?.redirectUrl || ''
                                 });
                                 setShowPortalConfigModal(true);
                               }}
@@ -1517,54 +1588,66 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-600 dark:text-slate-300">
-                        {[
-                          { device: 'iPhone 14 Pro', os: 'iOS 16', location: 'Café de la Gare', start: '10:15', duration: '45 min', traffic: '45 MB / 12 MB', status: 'Connecté', statusColor: 'bg-green-500/20 text-green-500' },
-                          { device: 'Galaxy S23', os: 'Android 13', location: 'Bibliothèque Centrale', start: '09:40', duration: '1h 20min', traffic: '120 MB / 55 MB', status: 'Connecté', statusColor: 'bg-green-500/20 text-green-500' },
-                          { device: 'MacBook Pro M2', os: 'macOS Sonoma', location: 'Café de la Gare', start: '08:30', duration: '2h 30min', traffic: '1.2 GB / 250 MB', status: 'Connecté', statusColor: 'bg-green-500/20 text-green-500' },
-                          { device: 'iPad Air', os: 'iPadOS 17', location: 'Piscine Municipale', start: '16:45', duration: '15 min (Expiré)', traffic: '15 MB / 2 MB', status: 'Déconnecté', statusColor: 'bg-slate-500/20 text-slate-500 dark:text-slate-400' },
-                          { device: 'Windows PC', os: 'Windows 11', location: 'Médiathèque', start: '12:10', duration: 'Bloqué', traffic: '5 MB / 1 MB', status: 'Bloqué', statusColor: 'bg-red-500/20 text-red-500' },
-                        ].map((log, i) => (
-                          <tr key={i} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
-                            <td className="px-6 py-4">
-                              <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
-                                <Smartphone size={14} className="text-slate-400" />
-                                {log.device}
-                              </div>
-                              <div className="text-xs text-slate-500 mt-1">{log.os}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-1.5 font-medium">
-                                <MapPin size={14} className="text-indigo-400" />
-                                {log.location}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div>{log.start}</div>
-                              <div className="text-xs text-slate-500 mt-1">{log.duration}</div>
-                            </td>
-                            <td className="px-6 py-4 font-medium">{log.traffic}</td>
-                            <td className="px-6 py-4">
-                              <span className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${log.statusColor}`}>
-                                {log.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
-                               {log.status === 'Connecté' && (
-                                 <button 
-                                   onClick={() => toast.success(`Appareil ${log.device} déconnecté avec succès.`)}
-                                   className="text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
-                                   title="Déconnecter"
-                                 >
-                                   <WifiOff size={16} />
-                                   <span className="hidden sm:inline">Déconnecter</span>
-                                 </button>
-                               )}
-                               <button className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-2">
-                                 <MoreHorizontal size={18} />
-                               </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {connections.length === 0 ? (
+                           <tr>
+                             <td colSpan={6} className="px-6 py-8 text-center text-slate-500">Aucune connexion enregistrée.</td>
+                           </tr>
+                        ) : (
+                          connections.map((log) => {
+                             const isConnected = log.status === 'Connecté';
+                             const statusColor = isConnected ? 'bg-green-500/20 text-green-500' : 'bg-slate-500/20 text-slate-500 dark:text-slate-400';
+                             const start = log.connectedAt ? new Date(log.connectedAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '...';
+                             const duration = log.duration ? `${log.duration} min` : '...';
+                             return (
+                               <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                                 <td className="px-6 py-4">
+                                   <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                                     <Smartphone size={14} className="text-slate-400" />
+                                     {log.device || "Appareil Inconnu"}
+                                   </div>
+                                   <div className="text-xs text-slate-500 mt-1">{log.os || "Inconnu"}</div>
+                                 </td>
+                                 <td className="px-6 py-4">
+                                   <div className="flex items-center gap-1.5 font-medium">
+                                     <MapPin size={14} className="text-indigo-400" />
+                                     {log.locationName || "Inconnu"}
+                                   </div>
+                                 </td>
+                                 <td className="px-6 py-4">
+                                   <div>{start}</div>
+                                   <div className="text-xs text-slate-500 mt-1">{duration}</div>
+                                 </td>
+                                 <td className="px-6 py-4 font-medium">-</td>
+                                 <td className="px-6 py-4">
+                                   <span className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${statusColor}`}>
+                                     {log.status || "Inconnu"}
+                                   </span>
+                                 </td>
+                                 <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                                    {isConnected && (
+                                      <button 
+                                        onClick={async () => {
+                                          try {
+                                             const { doc, updateDoc } = await import('firebase/firestore');
+                                             const { db } = await import('../firebase');
+                                             await updateDoc(doc(db, 'connections', log.id), { status: 'Déconnecté' });
+                                             toast.success(`Appareil ${log.device || ''} déconnecté.`);
+                                          } catch (e) {
+                                             toast.error("Erreur de déconnexion");
+                                          }
+                                        }}
+                                        className="text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                                        title="Déconnecter"
+                                      >
+                                        <WifiOff size={16} />
+                                        <span className="hidden sm:inline">Déconnecter</span>
+                                      </button>
+                                    )}
+                                 </td>
+                               </tr>
+                             );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -2826,8 +2909,12 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="mt-8 flex justify-end">
-                    <button className="px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/30 flex items-center gap-2">
-                      <CheckCircle2 size={18} />
+                    <button 
+                      onClick={handleSaveWifiConfig}
+                      disabled={isSavingWifiConfig}
+                      className="px-6 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-75 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/30 flex items-center gap-2"
+                    >
+                      {isSavingWifiConfig ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <CheckCircle2 size={18} />}
                       Enregistrer la configuration Wi-Fi
                     </button>
                   </div>
@@ -3713,6 +3800,19 @@ export default function Dashboard() {
                     className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors resize-none"
                     placeholder="Ex: Bienvenue au Café des Amis. Connectez-vous..."
                   ></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL de redirection (Optionnel)</label>
+                  <input 
+                    type="url"
+                    name="redirectUrl"
+                    value={portalConfigPreview.redirectUrl}
+                    onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, redirectUrl: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
+                    placeholder="https://votre-site.com/menu"
+                  />
+                  <p className="text-xs text-slate-500 mt-2">Redirige l'utilisateur vers ce lien une fois la connexion réussie.</p>
                 </div>
 
                 <div>

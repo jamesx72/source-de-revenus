@@ -37,6 +37,7 @@ service cloud.firestore {
              data.address is string && data.address.size() > 0 && data.address.size() <= 200 &&
              (!data.keys().hasAny(['portalConfig']) || (data.portalConfig is map)) &&
              (!data.keys().hasAny(['notificationConfig']) || (data.notificationConfig is map)) &&
+             (!data.keys().hasAny(['wifiConfig']) || (data.wifiConfig is map)) &&
              data.userId == request.auth.uid &&
              data.createdAt == request.time &&
              data.updatedAt == request.time;
@@ -63,7 +64,8 @@ service cloud.firestore {
                     incoming().type is string && incoming().type.size() > 0 && incoming().type.size() <= 50 &&
                     incoming().address is string && incoming().address.size() > 0 && incoming().address.size() <= 200 &&
                     (!incoming().keys().hasAny(['portalConfig']) || (incoming().portalConfig is map)) &&
-                    (!incoming().keys().hasAny(['notificationConfig']) || (incoming().notificationConfig is map));
+                    (!incoming().keys().hasAny(['notificationConfig']) || (incoming().notificationConfig is map)) &&
+                    (!incoming().keys().hasAny(['wifiConfig']) || (incoming().wifiConfig is map));
       allow read: if isOwner(resource.data.userId);
       allow delete: if isOwner(resource.data.userId);
     }

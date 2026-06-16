@@ -33,7 +33,8 @@
             "termsOfService": { "type": "string", "nullable": true },
             "layoutTheme": { "type": "string", "nullable": true },
             "sessionDuration": { "type": "number", "nullable": true },
-            "allowExtension": { "type": "boolean", "nullable": true }
+            "allowExtension": { "type": "boolean", "nullable": true },
+            "redirectUrl": { "type": "string", "nullable": true }
           }
         },
         "notificationConfig": {
@@ -43,6 +44,18 @@
             "emailEnabled": { "type": "boolean", "nullable": true },
             "pushEnabled": { "type": "boolean", "nullable": true },
             "notifyEmail": { "type": "string", "nullable": true }
+          }
+        },
+        "wifiConfig": {
+          "type": "object",
+          "properties": {
+            "timeLimit": { "type": "string", "nullable": true },
+            "customTimeLimit": { "type": "number", "nullable": true },
+            "bandwidth": { "type": "string", "nullable": true },
+            "autoRenew": { "type": "boolean", "nullable": true },
+            "autoRenewLimit": { "type": "number", "nullable": true },
+            "macBypassEnabled": { "type": "boolean", "nullable": true },
+            "macBypassGracePeriod": { "type": "number", "nullable": true }
           }
         },
         "createdAt": { "type": "timestamp" },

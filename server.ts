@@ -134,6 +134,47 @@ async function startServer() {
     }
   });
 
+  // Stripe Checkout Endpoint
+  app.post("/api/create-checkout-session", async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY environment variable. Please configure it in your secrets." });
+      }
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      const { priceId, passName, priceAmount, locationId } = req.body;
+      const appUrl = process.env.APP_URL || "http://localhost:3000";
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'eur',
+              product_data: {
+                name: passName,
+                description: `Accès Wi-Fi pour ${passName}`,
+              },
+              unit_amount: priceAmount,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: `${appUrl}/portal?locationId=${locationId}&payment_success=true`,
+        cancel_url: `${appUrl}/portal?locationId=${locationId}&payment_canceled=true`,
+      });
+
+      res.json({ id: session.id, url: session.url });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Unknown Stripe error" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
