@@ -5,15 +5,21 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { loadStripe } from '@stripe/stripe-js';
+import { EmbeddedCheckoutProvider, EmbeddedCheckout } from '@stripe/react-stripe-js';
+
+const stripePromise = loadStripe((import.meta as any).env.VITE_STRIPE_PUBLIC_KEY || '');
 
 export default function CaptivePortal() {
   const [searchParams] = useSearchParams();
   const locationId = searchParams.get('locationId');
   
-  const [step, setStep] = useState<'home' | 'ad' | 'success' | 'payment'>('home');
+  const [step, setStep] = useState<'home' | 'ad' | 'success' | 'payment' | 'payment_success'>('home');
   const [adProgress, setAdProgress] = useState(0);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentCode, setPaymentCode] = useState<string>('');
   
   const [locationName, setLocationName] = useState('Le Café Central');
   const [portalConfig, setPortalConfig] = useState<any>(null);
@@ -26,7 +32,8 @@ export default function CaptivePortal() {
     const fetchLocation = async () => {
       // payment handling check
       if (searchParams.get('payment_success') === 'true') {
-         setStep('success');
+         setPaymentCode(Math.random().toString(36).substring(2, 10).toUpperCase());
+         setStep('payment_success');
          // We do not run simulate ad, we manually log it.
          if (locationId) {
             try {
@@ -96,8 +103,9 @@ export default function CaptivePortal() {
         body: JSON.stringify({ priceAmount, passName, locationId })
       });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
+      if (data.clientSecret) {
+        setClientSecret(data.clientSecret);
+        setStep('payment');
       } else {
         alert(data.error || 'Erreur lors de la création de la session de paiement');
       }
@@ -353,6 +361,38 @@ export default function CaptivePortal() {
               </motion.div>
             )}
 
+            {step === 'payment_success' && (
+               <motion.div 
+                key="payment_success"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col h-full items-center p-8 bg-transparent text-center relative overflow-y-auto"
+              >
+                <div className="absolute top-[20%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-[60px]"></div>
+
+                <div className="w-24 h-24 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mt-4 mb-6 relative z-10 border border-indigo-500/30 shrink-0">
+                  <CheckCircle2 size={48} />
+                </div>
+                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">Paiement Réussi</h2>
+                <p className="text-slate-600 dark:text-slate-400 font-medium px-4 relative z-10 text-sm">Merci pour votre achat ! Voici votre code de connexion.</p>
+                
+                <div className="mt-8 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-2">Code d'accès Wi-Fi</p>
+                  <div className="bg-slate-100 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5 font-mono text-3xl font-bold text-indigo-500 tracking-widest">
+                    {paymentCode}
+                  </div>
+                </div>
+                
+                <button 
+                  onClick={() => setStep('success')}
+                  style={{ backgroundColor: activeThemeColor }}
+                  className="w-full py-4 text-white rounded-xl font-bold text-lg transition-transform shadow-lg shadow-indigo-500/20 mt-auto hover:opacity-90 active:scale-95"
+                >
+                  Se connecter maintenant
+                </button>
+              </motion.div>
+            )}
+
             {step === 'success' && (
                <motion.div 
                 key="success"
@@ -431,53 +471,31 @@ export default function CaptivePortal() {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className="flex flex-col h-full bg-transparent p-6 relative overflow-y-auto"
+                className="flex flex-col h-full bg-slate-50 dark:bg-[#050614] rounded-[2rem] overflow-hidden"
               >
-                <button 
-                  onClick={() => setStep('home')}
-                  className="w-10 h-10 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/10 transition-colors mb-6 flex-shrink-0"
-                >
-                  <ChevronLeft size={20} />
-                </button>
-
-                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Paiement sécurisé</h2>
-
-                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-4 flex justify-between items-center mb-8 backdrop-blur-sm">
-                  <div>
-                    <p className="font-semibold text-slate-900 dark:text-white text-sm">Pass Express (2H)</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Le Café Central</p>
-                  </div>
-                  <div className="text-xl font-bold text-slate-900 dark:text-white">2,00 €</div>
+                <div className="p-6 relative z-10 bg-white/40 dark:bg-black/20 backdrop-blur-md border-b border-slate-200 dark:border-white/10 flex items-center gap-4 shrink-0">
+                   <button 
+                     onClick={() => setStep('home')}
+                     className="w-10 h-10 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+                   >
+                     <ChevronLeft size={20} />
+                   </button>
+                   <h2 className="text-xl font-bold text-slate-900 dark:text-white">Paiement</h2>
                 </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Email (pour le reçu)</label>
-                    <input type="email" placeholder="client@email.com" className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Carte bancaire</label>
-                    <div className="relative">
-                      <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-                      <input type="text" placeholder="0000 0000 0000 0000" className="w-full pl-10 pr-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <input type="text" placeholder="MM/AA" className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600" />
-                    <input type="text" placeholder="CVC" className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-600" />
-                  </div>
-                </div>
-
-                <div className="mt-8 pt-8 border-t border-slate-200 dark:border-white/10">
-                  <button 
-                    onClick={() => setStep('success')}
-                    className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-500/30 transition-colors flex items-center justify-center gap-2"
-                  >
-                    Payer 2,00 €
-                  </button>
-                  <div className="flex justify-center items-center gap-2 mt-4 text-xs text-slate-500">
-                    <ShieldCheck size={14} /> Paiement sécurisé par Stripe
-                  </div>
+                <div className="flex-1 w-full overflow-y-auto" id="checkout">
+                   {clientSecret ? (
+                      <EmbeddedCheckoutProvider
+                        stripe={stripePromise}
+                        options={{ clientSecret }}
+                      >
+                        <EmbeddedCheckout />
+                      </EmbeddedCheckoutProvider>
+                   ) : (
+                      <div className="flex items-center justify-center h-full">
+                         <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+                      </div>
+                   )}
                 </div>
               </motion.div>
             )}

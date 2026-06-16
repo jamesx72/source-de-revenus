@@ -10,8 +10,6 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
-
   // Initialize Firebase Admin for background tasks
   let adminDb: any = null;
   try {
@@ -65,6 +63,63 @@ async function startServer() {
   } catch (err: any) {
     console.log("Skipping Firebase Admin initialization (expected if application default credentials are unavailable): ", err.message);
   }
+
+  // Stripe Webhook handling
+  app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    if (!stripeSecret || !webhookSecret) {
+      console.log("Missing Stripe webhook keys.");
+      return res.status(500).send("Missing Stripe keys.");
+    }
+    
+    try {
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+      const signature = req.headers['stripe-signature'];
+
+      let event;
+      try {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          signature as string,
+          webhookSecret
+        );
+      } catch (err: any) {
+        console.error(`Webhook signature verification failed: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+      }
+
+      if (event.type === 'checkout.session.completed') {
+        const session = event.data.object as any;
+        console.log('Payment was successful for session:', session.id);
+        
+        if (adminDb) {
+          try {
+            await adminDb.collection('transactions').add({
+              sessionId: session.id,
+              amount: session.amount_total / 100, // Amount in units instead of cents
+              currency: session.currency,
+              status: session.payment_status,
+              customerEmail: session.customer_details?.email || null,
+              createdAt: new Date().toISOString(),
+            });
+            console.log(`Transaction ${session.id} recorded successfully.`);
+          } catch(dbErr) {
+            console.error(`Failed to record transaction ${session.id}:`, dbErr);
+          }
+        }
+      }
+
+      res.json({ received: true });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).send(`Unhandled error: ${e.message}`);
+    }
+  });
+
+  app.use(express.json());
 
   // API endpoints
   app.post("/api/generate-theme", async (req, res) => {
@@ -149,7 +204,7 @@ async function startServer() {
       const appUrl = process.env.APP_URL || "http://localhost:3000";
 
       const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
+        ui_mode: 'embedded' as any,
         line_items: [
           {
             price_data: {
@@ -164,11 +219,10 @@ async function startServer() {
           },
         ],
         mode: 'payment',
-        success_url: `${appUrl}/portal?locationId=${locationId}&payment_success=true`,
-        cancel_url: `${appUrl}/portal?locationId=${locationId}&payment_canceled=true`,
+        return_url: `${appUrl}/portal?locationId=${locationId}&payment_success=true&session_id={CHECKOUT_SESSION_ID}`,
       });
 
-      res.json({ id: session.id, url: session.url });
+      res.json({ clientSecret: session.client_secret });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: e.message || "Unknown Stripe error" });

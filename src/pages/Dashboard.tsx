@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle } from 'lucide-react';
+import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -184,6 +184,7 @@ export default function Dashboard() {
   // Locations state
   const [locations, setLocations] = useState<any[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
@@ -218,6 +219,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     let unsubscribeConnections: (() => void) | undefined;
+    let unsubscribeTransactions: (() => void) | undefined;
     async function fetchLocations() {
       if (!user) {
         setIsDataLoading(false);
@@ -259,6 +261,20 @@ export default function Dashboard() {
            console.error("Error fetching connections logs in real-time:", error);
         });
 
+        const transactionsQuery = query(
+          collection(db, 'transactions'),
+          orderBy('createdAt', 'desc')
+        );
+        unsubscribeTransactions = onSnapshot(transactionsQuery, (snapshot) => {
+           const txData = snapshot.docs.map(doc => ({
+             id: doc.id,
+             ...doc.data()
+           }));
+           setTransactions(txData);
+        }, (error) => {
+           console.error("Error fetching transactions in real-time:", error);
+        });
+
       } catch (err: any) {
         console.error("Failed to fetch locations:", err);
       } finally {
@@ -269,6 +285,9 @@ export default function Dashboard() {
     return () => {
       if (unsubscribeConnections) {
         unsubscribeConnections();
+      }
+      if (unsubscribeTransactions) {
+        unsubscribeTransactions();
       }
     };
   }, [user]);
@@ -611,6 +630,7 @@ export default function Dashboard() {
               { id: 'vouchers', icon: Ticket, label: 'Vouchers & Accès' },
               { id: 'users', icon: Users, label: 'Visiteurs & CRM' },
               { id: 'ads', icon: DollarSign, label: 'Publicités & Revenus' },
+              { id: 'transactions', icon: CreditCard, label: 'Transactions' },
               { id: 'analytics', icon: Activity, label: 'Statistiques & IA' },
               { id: 'health', icon: HeartPulse, label: 'État du système' },
               { id: 'support', icon: MessageSquare, label: 'Support Technique' },
@@ -1847,6 +1867,91 @@ export default function Dashboard() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {!isDataLoading && activeTab === 'transactions' && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Transactions</h2>
+                  <p className="text-slate-500 dark:text-slate-400">Suivez les revenus et vérifiez l'historique des paiements Wi-Fi.</p>
+                </div>
+
+                {/* KPI Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
+                    <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl flex items-center justify-center mb-4">
+                      <DollarSign size={24} />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Revenu Total</h3>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{transactions.reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2)}</div>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 flex items-center gap-1"><ArrowUpRight size={14} /> +12.5% vs mois dernier</p>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
+                    <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl flex items-center justify-center mb-4">
+                      <CreditCard size={24} />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Transactions Réussies</h3>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">{transactions.filter(t => t.status === 'paid').length}</div>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
+                    <div className="w-12 h-12 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center mb-4">
+                      <Activity size={24} />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Panier Moyen</h3>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{transactions.length > 0 ? (transactions.reduce((acc, tx) => acc + (tx.amount || 0), 0) / transactions.length).toFixed(2) : '0.00'}</div>
+                  </div>
+                </div>
+
+                {/* Transactions Table */}
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-slate-200 dark:border-white/10">
+                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Historique des transactions</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-white/5 border-b border-slate-200 dark:border-white/10">
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Date & Heure</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Identifiant</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Établissement</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Montant</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Statut</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-white/10">
+                        {transactions.map((tx, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                            <td className="px-6 py-4">
+                              <span className="text-sm font-medium text-slate-900 dark:text-white">{new Date(tx.createdAt).toLocaleString('fr-FR')}</span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{tx.sessionId?.substring(0, 16) || tx.id}...</span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
+                              Le Café Central
+                            </td>
+                            <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
+                              €{Number(tx.amount || 0).toFixed(2)}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${tx.status === 'paid' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
+                                {tx.status === 'paid' ? 'Réussi' : tx.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {transactions.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
+                              Aucune transaction pour le moment.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
