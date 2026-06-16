@@ -138,6 +138,7 @@ export default function Dashboard() {
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
   const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
+  const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any>(null);
 
   const [discounts, setDiscounts] = useState<any[]>([]);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
@@ -950,13 +951,16 @@ export default function Dashboard() {
     ? Math.round(connections.reduce((acc, curr) => acc + (curr.duration || 0), 0) / connections.length) 
     : 0;
 
+  const actualRevenue = transactions.filter(t => t.status === 'paid').reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2);
+
   const dashboardStats = [
-    { label: 'Revenus Potentiels', value: `${activeSessions * 2} €`, trend: 'Basé sur sessions actives', trendColor: 'text-indigo-400' },
+    { label: 'Revenu Total', value: `${actualRevenue} €`, trend: 'Basé sur les transactions', trendColor: 'text-indigo-400' },
     { label: 'Visiteurs Uniques', value: uniqueDevices.toString(), trend: 'Basé sur les appareils', trendColor: 'text-slate-500' },
-    { label: 'Sessions Wi-Fi Actives', value: activeSessions.toString(), trend: 'En temps réel', trendColor: 'text-green-400' },
-    { label: 'Temps Moyen', value: `${avgSessionTime} min`,  trend: 'Calculé sur toutes les sessions', trendColor: 'text-slate-500' },
-    { label: 'Satisfaction Client', value: '4.8/5', trend: 'Sur les avis reçus', trendColor: 'text-amber-500' },
+    { label: 'Utilisateurs Connectés', value: activeSessions.toString(), trend: 'En temps réel', trendColor: 'text-green-400' },
+    { label: 'Temps Moyen (Session)', value: `${avgSessionTime} min`,  trend: 'Calculé sur toutes les données', trendColor: 'text-slate-500' },
+    { label: 'Transactions Sécurisées', value: transactions.filter(t => t.status === 'paid').length.toString(), trend: 'Paiements réussis', trendColor: 'text-emerald-500' },
   ];
+
 
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-[#050614] text-slate-900 dark:text-white font-sans relative overflow-hidden">
@@ -1114,7 +1118,8 @@ export default function Dashboard() {
                   <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{stat.label}</p>
                   <p className="text-3xl lg:text-3xl font-bold flex items-center gap-2">
                     {stat.value}
-                    {stat.label === 'Satisfaction Client' && <Star size={20} className="text-amber-400 fill-amber-400" />}
+                    {stat.label === 'Transactions Sécurisées' && <ShieldCheck size={20} className="text-emerald-400" />}
+                    {stat.label === 'Utilisateurs Connectés' && <Wifi size={20} className="text-green-400" />}
                   </p>
                   <div className={`text-xs mt-2 ${stat.trendColor}`}>{stat.trend}</div>
                 </div>
@@ -1507,6 +1512,15 @@ export default function Dashboard() {
                                {new Date(voucher.createdAt).toLocaleDateString('fr-FR')} à {new Date(voucher.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                               <button 
+                                 onClick={() => {
+                                   setSelectedVoucherForPrint(voucher);
+                                 }}
+                                 className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                                 title="QR & Imprimer"
+                               >
+                                 <QrCode size={16} /> Imprimer
+                               </button>
                                <button 
                                  onClick={() => {
                                    navigator.clipboard.writeText(voucher.code);
@@ -4398,6 +4412,56 @@ export default function Dashboard() {
                <div className="mt-8 z-10 text-[10px] text-slate-500 underline decoration-slate-600 underline-offset-4 cursor-pointer hover:text-slate-400">
                   {t.terms}
                </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Print Voucher Modal */}
+      {selectedVoucherForPrint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all">
+          <div className="bg-white dark:bg-[#050614] print:bg-white rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl print:border-none print:shadow-none print-only-voucher">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 print:hidden">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                Imprimer le Voucher
+              </h3>
+              <button onClick={() => setSelectedVoucherForPrint(null)} className="text-slate-400 hover:text-slate-500">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-8 flex flex-col items-center justify-center gap-4 text-center">
+               <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center">
+                 <Wifi className="text-slate-500 dark:text-slate-400" size={32} />
+               </div>
+               <div>
+                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white print:text-black">Accès Wi-Fi Client</h2>
+                 <p className="text-slate-500 dark:text-slate-400 print:text-gray-500 mt-1">Scannez le QR code ou utilisez le code manuel</p>
+               </div>
+               
+               <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm my-4">
+                 <QRCodeSVG 
+                    value={`https://portal.example.com/login?code=${selectedVoucherForPrint.code}`}
+                    size={160} 
+                    level={"H"}
+                    includeMargin={false}
+                 />
+               </div>
+               
+               <div className="bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-4 rounded-xl w-full border border-dashed border-slate-300 dark:border-slate-600 print:border-gray-300">
+                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider mb-2">Code d'accès sécurisé</p>
+                 <div className="font-mono text-3xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black">{selectedVoucherForPrint.code}</div>
+               </div>
+               <div className="text-sm text-slate-500 dark:text-slate-400 mt-2">
+                 Durée de validité : <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.duration}</span>
+               </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden">
+               <button 
+                 onClick={() => window.print()}
+                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+               >
+                 <QrCode size={18} /> Lancer l'impression
+               </button>
             </div>
           </div>
         </div>

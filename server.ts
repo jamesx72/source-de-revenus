@@ -2,103 +2,24 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import cron from 'node-cron';
-import { initializeApp as initializeAdminApp, applicationDefault } from 'firebase-admin/app';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, getDocs, doc, getDoc, updateDoc, query, where } from "firebase/firestore";
+import fs from "fs";
+
+// Initialize Firebase Client SDK for server-side operations (Stripe webhooks)
+let db: any = null;
+try {
+  const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
+  const app = initializeApp(firebaseConfig, "server-app");
+  db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  console.log("Firebase Client SDK initialized on server.");
+} catch (err: any) {
+  console.log("Skipping Firebase server initialization: ", err.message);
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // Initialize Firebase Admin for background tasks
-  let adminDb: any = null;
-  try {
-    const adminApp = initializeAdminApp({
-      projectId: "studio-8479066300-24a9a",
-      credential: applicationDefault()
-    });
-    adminDb = getAdminFirestore(adminApp, "ai-studio-e122ace1-e8ea-43ff-9de3-8dcb4cf686e6");
-    console.log("Firebase Admin initialized for automated backups.");
-    
-    // Schedule backup task every 24 hours (at midnight)
-    cron.schedule('0 0 * * *', async () => {
-      console.log("Starting automated 24h backup task...");
-      try {
-        if (!adminDb) return;
-        
-        const timestamp = new Date().toISOString();
-        const backupRef = adminDb.collection('backups').doc(`backup-${timestamp}`);
-        
-        // 1. Backup Captive Portal Configurations (locations)
-        const locationsSnap = await adminDb.collection('locations').get();
-        const locationsBackup = locationsSnap.docs.map((doc: any) => ({
-           id: doc.id,
-           ...doc.data()
-        }));
-        
-        // 2. Backup User Logs
-        const logsSnap = await adminDb.collection('userLogs').limit(5000).get();
-        const userLogsBackup = logsSnap.docs.map((doc: any) => ({
-           id: doc.id,
-           ...doc.data()
-        }));
-        
-        // 3. Save to a separate collection
-        await backupRef.set({
-          timestamp,
-          type: 'daily_backup',
-          metadata: {
-            locationsCount: locationsBackup.length,
-            userLogsCount: userLogsBackup.length
-          },
-          locations: locationsBackup,
-          userLogs: userLogsBackup
-        });
-        
-        console.log(`Backup completed successfully at ${timestamp}`);
-      } catch (err: any) {
-         console.error("Backup failed: ", err.message);
-      }
-    });
-
-    // Schedule automated Voucher Generation (e.g. daily at 1 AM)
-    cron.schedule('0 1 * * *', async () => {
-      console.log("Starting automated voucher generation task...");
-      try {
-        if (!adminDb) return;
-        const locationsSnap = await adminDb.collection('locations').get();
-        let generatedCount = 0;
-        
-        for (const doc of locationsSnap.docs) {
-           const loc = doc.data();
-           // Example config: loc.autoVouchersEnabled && loc.autoVouchersQuantity
-           if (loc.autoVouchersEnabled && loc.autoVouchersQuantity > 0) {
-              for (let i = 0; i < loc.autoVouchersQuantity; i++) {
-                 const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-                 let code = 'AUTO-';
-                 for (let j = 0; j < 6; j++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-                 
-                 await adminDb.collection('vouchers').add({
-                    code: code,
-                    duration: loc.autoVouchersDuration || '1h',
-                    locationId: doc.id,
-                    status: 'active',
-                    createdAt: new Date().toISOString(),
-                    usedAt: null,
-                    createdBy: loc.userId || 'system_cron'
-                 });
-                 generatedCount++;
-              }
-           }
-        }
-        console.log(`Generated ${generatedCount} automated vouchers.`);
-      } catch (err: any) {
-         console.error("Voucher generation failed: ", err.message);
-      }
-    });
-  } catch (err: any) {
-    console.log("Skipping Firebase Admin initialization (expected if application default credentials are unavailable): ", err.message);
-  }
 
   // Stripe Webhook handling
   app.post('/api/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -131,9 +52,9 @@ async function startServer() {
         const session = event.data.object as any;
         console.log('Payment was successful for session:', session.id);
         
-        if (adminDb) {
+        if (db) {
           try {
-            await adminDb.collection('transactions').add({
+            await addDoc(collection(db, 'transactions'), {
               sessionId: session.id,
               amount: session.amount_total / 100, // Amount in units instead of cents
               currency: session.currency,
@@ -147,13 +68,12 @@ async function startServer() {
             
             // Increment discount uses if a code was used
             if (session.metadata?.discountCode && session.metadata?.locationId) {
-                const discountsRef = adminDb.collection('discounts');
-                const snapshot = await discountsRef.where('code', '==', session.metadata.discountCode)
-                                                   .where('locationId', '==', session.metadata.locationId)
-                                                   .get();
+                const discountsRef = collection(db, 'discounts');
+                const q = query(discountsRef, where('code', '==', session.metadata.discountCode), where('locationId', '==', session.metadata.locationId));
+                const snapshot = await getDocs(q);
                 if (!snapshot.empty) {
                    const discountDoc = snapshot.docs[0];
-                   await discountDoc.ref.update({
+                   await updateDoc(doc(db, 'discounts', discountDoc.id), {
                       uses: (discountDoc.data().uses || 0) + 1
                    });
                 }
@@ -161,8 +81,8 @@ async function startServer() {
             
             // Automated Email Notifications
             if (session.metadata?.locationId) {
-              const locationDoc = await adminDb.collection('locations').doc(session.metadata.locationId).get();
-              if (locationDoc.exists) {
+              const locationDoc = await getDoc(doc(db, 'locations', session.metadata.locationId));
+              if (locationDoc.exists()) {
                  const locationData = locationDoc.data();
                  const smtpConfig = locationData.smtpConfig || {};
                  
@@ -361,13 +281,13 @@ async function startServer() {
       const { locationId, userId } = req.body;
       if (!locationId || !userId) return res.status(400).json({ error: "Missing locationId or userId" });
 
-      if (!adminDb) {
+      if (!db) {
          return res.status(500).json({ error: "Database not initialized" });
       }
       
-      const locRef = adminDb.collection('locations').doc(locationId);
-      const locDoc = await locRef.get();
-      if (!locDoc.exists) return res.status(404).json({ error: "Location not found" });
+      const locRef = doc(db, 'locations', locationId);
+      const locDoc = await getDoc(locRef);
+      if (!locDoc.exists()) return res.status(404).json({ error: "Location not found" });
       
       const locationData = locDoc.data();
       let accountId = locationData.stripeAccountId;
@@ -382,7 +302,7 @@ async function startServer() {
           },
         });
         accountId = account.id;
-        await locRef.update({ stripeAccountId: accountId });
+        await updateDoc(locRef, { stripeAccountId: accountId });
       }
 
       const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -418,12 +338,10 @@ async function startServer() {
       const appUrl = process.env.APP_URL || "http://localhost:3000";
 
       // Apply discount if provided
-      if (discountCode && adminDb) {
-        const discountsRef = adminDb.collection('discounts');
-        const snapshot = await discountsRef.where('code', '==', discountCode)
-                                           .where('locationId', '==', locationId)
-                                           .where('status', '==', 'active')
-                                           .get();
+      if (discountCode && db) {
+        const discountsRef = collection(db, 'discounts');
+        const q = query(discountsRef, where('code', '==', discountCode), where('locationId', '==', locationId), where('status', '==', 'active'));
+        const snapshot = await getDocs(q);
         if (!snapshot.empty) {
           const discountDoc = snapshot.docs[0];
           const discount = discountDoc.data();
@@ -452,9 +370,9 @@ async function startServer() {
 
       let transfer_data: any = undefined;
       // Configure sub-merchant payout via Stripe Connect if applicable.
-      if (adminDb && locationId) {
-        const locDoc = await adminDb.collection('locations').doc(locationId).get();
-        if (locDoc.exists) {
+      if (db && locationId) {
+        const locDoc = await getDoc(doc(db, 'locations', locationId));
+        if (locDoc.exists()) {
           const locData = locDoc.data();
           if (locData.stripeAccountId) {
             // Keep 20% platform fee, 80% to the affiliated location sub-merchant.
