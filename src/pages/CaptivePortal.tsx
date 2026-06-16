@@ -175,6 +175,33 @@ export default function CaptivePortal() {
     }
   };
 
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (step === 'success') {
+      if (timeLeft === null) setTimeLeft(sessionDuration * 60);
+    } else if (step === 'payment_success') {
+      // Premium 120 minutes
+      setTimeLeft(120 * 60); 
+    }
+  }, [step, sessionDuration]);
+
+  useEffect(() => {
+    if (timeLeft === null || timeLeft <= 0) return;
+    const interval = setInterval(() => {
+      setTimeLeft(prev => prev !== null && prev > 0 ? prev - 1 : 0);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timeLeft]);
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-[#050614] flex items-center justify-center">
@@ -412,7 +439,16 @@ export default function CaptivePortal() {
                 {sessionDuration > 0 && (
                   <div className="mt-8 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
                     <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-1">Temps restant</p>
-                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{sessionDuration}:00</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white mb-4">{timeLeft !== null ? formatTime(timeLeft) : `${sessionDuration}:00`}</p>
+                    
+                    <button 
+                      onClick={() => handleCheckout(200, "Extension Premium 2 Heures")}
+                      disabled={isProcessingPayment}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 rounded-xl transition-colors font-medium border border-indigo-100 dark:border-indigo-500/20"
+                    >
+                      <span>Prolonger (+2h) - 2.00 €</span>
+                      {isProcessingPayment && <div className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>}
+                    </button>
                   </div>
                 )}
                 

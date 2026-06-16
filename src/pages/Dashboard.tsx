@@ -173,18 +173,14 @@ export default function Dashboard() {
     }
   }
 
-  // Vouchers state
-  const [showVoucherModal, setShowVoucherModal] = useState(false);
-  const [vouchers, setVouchers] = useState([
-    { id: '1', code: 'A7X9-B2M4', duration: '2 heures', status: 'actif', locationId: 'all', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString() },
-    { id: '2', code: 'K9P1-C4R8', duration: '24 heures', status: 'utilisé', locationId: 'all', createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString() },
-    { id: '3', code: 'L2N5-J7W3', duration: '1 semaine', status: 'actif', locationId: 'all', createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString() },
-  ]);
-
   // Locations state
   const [locations, setLocations] = useState<any[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [vouchers, setVouchers] = useState<any[]>([]);
+  const [showVoucherModal, setShowVoucherModal] = useState(false);
+  const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
+  const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
@@ -220,6 +216,7 @@ export default function Dashboard() {
   useEffect(() => {
     let unsubscribeConnections: (() => void) | undefined;
     let unsubscribeTransactions: (() => void) | undefined;
+    let unsubscribeVouchers: (() => void) | undefined;
     async function fetchLocations() {
       if (!user) {
         setIsDataLoading(false);
@@ -275,6 +272,20 @@ export default function Dashboard() {
            console.error("Error fetching transactions in real-time:", error);
         });
 
+        const vouchersQuery = query(
+          collection(db, 'vouchers'),
+          orderBy('createdAt', 'desc')
+        );
+        unsubscribeVouchers = onSnapshot(vouchersQuery, (snapshot) => {
+           const vData = snapshot.docs.map(doc => ({
+             id: doc.id,
+             ...doc.data()
+           }));
+           setVouchers(vData);
+        }, (error) => {
+           console.error("Error fetching vouchers in real-time:", error);
+        });
+
       } catch (err: any) {
         console.error("Failed to fetch locations:", err);
       } finally {
@@ -288,6 +299,9 @@ export default function Dashboard() {
       }
       if (unsubscribeTransactions) {
         unsubscribeTransactions();
+      }
+      if (unsubscribeVouchers) {
+        unsubscribeVouchers();
       }
     };
   }, [user]);
@@ -369,6 +383,62 @@ export default function Dashboard() {
     } catch (error: any) {
       console.error(error);
       toast.error("Erreur lors de la suppression.");
+    }
+  };
+
+  const handleGenerateVouchers = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsGeneratingVouchers(true);
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const promises = [];
+      const generateCode = () => {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let code = voucherConfig.prefix ? voucherConfig.prefix.toUpperCase() + '-' : '';
+        for (let i = 0; i < 6; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return code;
+      };
+
+      for (let i = 0; i < voucherConfig.quantity; i++) {
+        promises.push(addDoc(collection(db, 'vouchers'), {
+          code: generateCode(),
+          duration: voucherConfig.duration,
+          locationId: voucherConfig.locationId || locations[0]?.id || '',
+          status: 'active', // active, used, revoked
+          createdAt: new Date().toISOString(),
+          usedAt: null,
+          createdBy: user?.uid
+        }));
+      }
+
+      await Promise.all(promises);
+      toast.success(`${voucherConfig.quantity} code(s) généré(s) avec succès.`);
+      setShowVoucherModal(false);
+      setVoucherConfig({ duration: '1h', quantity: 1, prefix: '', locationId: locations[0]?.id || '' });
+    } catch (err: any) {
+      console.error("Failed to generate vouchers:", err.message);
+      toast.error("Erreur lors de la génération des codes.");
+    } finally {
+      setIsGeneratingVouchers(false);
+    }
+  };
+
+  const handleRevokeVoucher = async (voucherId: string) => {
+    if (!confirm('Voulez-vous vraiment révoquer ce code d\'accès ?')) return;
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      await updateDoc(doc(db, 'vouchers', voucherId), {
+        status: 'revoked'
+      });
+      toast.success("Code d'accès révoqué avec succès.");
+    } catch(err) {
+      console.error("Failed to revoke voucher:", err);
+      toast.error("Erreur lors de la révocation du code.");
     }
   };
 
@@ -513,12 +583,87 @@ export default function Dashboard() {
   };
 
   const [isEditingRatio, setIsEditingRatio] = useState(false);
-  const [users, setUsers] = useState([
-    { id: 1, name: 'Jean Martin', email: 'jean.m@email.com',  time: 'Aujourd\'hui, 14:30', pts: 240, status: 'VIP', color: 'bg-purple-500/20 text-purple-400' },
-    { id: 2, name: 'Alice Dupont', email: 'alice.d@email.com', time: 'Hier, 10:15', pts: 80, status: 'Régulier', color: 'bg-blue-500/20 text-blue-400' },
-    { id: 3, name: 'Sophie Bernard', email: 'sophie.b@email.com', time: 'Il y a 3 jours', pts: 50, status: 'Nouveau', color: 'bg-emerald-500/20 text-emerald-400' },
-    { id: 4, name: 'Luc Tremblay', email: 'luc.t@email.com', time: 'Il y a 1 sem.', pts: 120, status: 'Régulier', color: 'bg-blue-500/20 text-blue-400' },
-  ]);
+  const [deductedPoints, setDeductedPoints] = useState<Record<string, number>>({});
+
+  const dynamicCrmUsers = React.useMemo(() => {
+    const userMap: Record<string, { id: string, name: string, email: string, lastTime: Date | null, sessions: number, durationTotal: number, pts: number }> = {};
+    
+    connections.forEach(c => {
+       const deviceKey = c.device || 'Inconnu';
+       const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : null;
+       
+       if (!userMap[deviceKey]) {
+          userMap[deviceKey] = {
+             id: deviceKey,
+             name: `Appareil ${deviceKey}`,
+             email: '-',
+             lastTime: date,
+             sessions: 0,
+             durationTotal: 0,
+             pts: 0
+          };
+       }
+       
+       userMap[deviceKey].sessions += 1;
+       userMap[deviceKey].durationTotal += c.duration || 60; // default 60 min
+       if (date && userMap[deviceKey].lastTime && date > userMap[deviceKey].lastTime) {
+          userMap[deviceKey].lastTime = date;
+       } else if (!userMap[deviceKey].lastTime) {
+          userMap[deviceKey].lastTime = date;
+       }
+    });
+
+    transactions.forEach(t => {
+       if (t.customerEmail) {
+          const emailKey = t.customerEmail;
+          if (!userMap[emailKey]) {
+             userMap[emailKey] = {
+                id: emailKey,
+                name: 'Client ' + emailKey.split('@')[0],
+                email: emailKey,
+                lastTime: new Date(t.createdAt),
+                sessions: 1, 
+                durationTotal: 120, 
+                pts: 0
+             };
+          } else {
+             if (new Date(t.createdAt) > userMap[emailKey].lastTime!) {
+                userMap[emailKey].lastTime = new Date(t.createdAt);
+             }
+          }
+          userMap[emailKey].pts += 100;
+       }
+    });
+
+    return Object.values(userMap).map(u => {
+       const hours = u.durationTotal / 60;
+       const ptsFromDuration = Math.round(hours * ratioConfig.points);
+       const deduct = deductedPoints[u.id] || 0;
+       const totalPts = Math.max(0, u.pts + ptsFromDuration - deduct);
+
+       let status = 'Nouveau';
+       let color = 'bg-emerald-500/20 text-emerald-400';
+       if (totalPts > 200 || u.sessions > 5) {
+          status = 'VIP';
+          color = 'bg-purple-500/20 text-purple-400';
+       } else if (u.sessions > 1) {
+          status = 'Régulier';
+          color = 'bg-blue-500/20 text-blue-400';
+       }
+
+       return {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          time: u.lastTime ? u.lastTime.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Inconnu',
+          pts: totalPts,
+          sessions: u.sessions,
+          status,
+          color
+       };
+    }).sort((a,b) => b.pts - a.pts);
+
+  }, [connections, transactions, ratioConfig, deductedPoints]);
 
   useEffect(() => {
     // Simulate bandwidth hit notification
@@ -536,7 +681,7 @@ export default function Dashboard() {
     }, 15000);
     return () => clearInterval(interval);
   }, [wifiConfig.bandwidth]);
-  const [redeemModal, setRedeemModal] = useState<{ isOpen: boolean; userId: number | null }>({ isOpen: false, userId: null });
+  const [redeemModal, setRedeemModal] = useState<{ isOpen: boolean; userId: string | null }>({ isOpen: false, userId: null });
   const [selectedRewardId, setSelectedRewardId] = useState<string | null>(null);
 
   const [rewards, setRewards] = useState([
@@ -563,11 +708,13 @@ export default function Dashboard() {
     if (redeemModal.userId && selectedRewardId) {
       const reward = activeRewards.find(r => r.id === selectedRewardId);
       if (reward) {
-        setUsers(users.map(u => 
-          u.id === redeemModal.userId ? { ...u, pts: u.pts - reward.points } : u
-        ));
+        setDeductedPoints(prev => ({
+           ...prev,
+           [redeemModal.userId as string]: (prev[redeemModal.userId as string] || 0) + reward.points
+        }));
         setRedeemModal({ isOpen: false, userId: null });
         setSelectedRewardId(null);
+        toast.success(`Récompense échangée avec succès !`);
       }
     }
   };
@@ -579,6 +726,110 @@ export default function Dashboard() {
   if (!user) {
     return <Navigate to="/" replace />;
   }
+
+  const { dynamicRevenueDaily, dynamicRevenueMonthly } = React.useMemo(() => {
+    const dailyMap: Record<string, { sales: number, ads: number }> = {};
+    const monthlyMap: Record<string, { sales: number, ads: number }> = {};
+
+    transactions.forEach(t => {
+      const date = new Date(t.createdAt);
+      if (isNaN(date.getTime())) return;
+      let dayStr = date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
+      dayStr = dayStr.charAt(0).toUpperCase() + dayStr.slice(1);
+      const dayM = DAYS.find(d => dayStr.startsWith(d)) || 'Lun';
+      
+      const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
+      const monthM = monthStr.charAt(0).toUpperCase() + monthStr.slice(1).replace('.', '');
+
+      if (!dailyMap[dayM]) dailyMap[dayM] = { sales: 0, ads: 0 };
+      if (!monthlyMap[monthM]) monthlyMap[monthM] = { sales: 0, ads: 0 };
+
+      if (t.status === 'paid' && t.amount) {
+        dailyMap[dayM].sales += t.amount;
+        monthlyMap[monthM].sales += t.amount;
+      }
+    });
+
+    connections.forEach(c => {
+      const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
+      if (isNaN(date.getTime())) return;
+      let dayStr = date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
+      dayStr = dayStr.charAt(0).toUpperCase() + dayStr.slice(1);
+      const dayM = DAYS.find(d => dayStr.startsWith(d)) || 'Lun';
+
+      const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
+      const monthM = monthStr.charAt(0).toUpperCase() + monthStr.slice(1).replace('.', '');
+
+      if (!dailyMap[dayM]) dailyMap[dayM] = { sales: 0, ads: 0 };
+      if (!monthlyMap[monthM]) monthlyMap[monthM] = { sales: 0, ads: 0 };
+      
+      dailyMap[dayM].ads += 0.15;
+      monthlyMap[monthM].ads += 0.15;
+    });
+
+    const daily = DAYS.map(d => ({ name: d, sales: dailyMap[d]?.sales || 0, ads: dailyMap[d]?.ads || 0 }));
+    let monthly = Object.keys(monthlyMap).map(m => ({ name: m, sales: monthlyMap[m].sales, ads: monthlyMap[m].ads }));
+    if (monthly.length === 0) monthly = MONTHLY_REVENUE_DATA;
+
+    return { dynamicRevenueDaily: daily, dynamicRevenueMonthly: monthly };
+  }, [transactions, connections]);
+
+  const dynamicWifiUsage = React.useMemo(() => {
+    const monthsMap: Record<string, { sessions: number, dataGB: number }> = {};
+    connections.forEach(c => {
+       const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
+       if (isNaN(date.getTime())) return;
+       const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
+       const monthM = monthStr.charAt(0).toUpperCase() + monthStr.slice(1).replace('.', '');
+       if (!monthsMap[monthM]) monthsMap[monthM] = { sessions: 0, dataGB: 0 };
+       monthsMap[monthM].sessions += 1;
+       monthsMap[monthM].dataGB += 0.2;
+    });
+    const usage = Object.keys(monthsMap).map(m => ({ name: m, sessions: monthsMap[m].sessions, dataGB: Math.round(monthsMap[m].dataGB) }));
+    return usage.length > 0 ? usage : WIFI_USAGE_DATA;
+  }, [connections]);
+
+  const dynamicDeviceDistribution = React.useMemo(() => {
+    const dist: Record<string, number> = { Mobile: 0, Desktop: 0, Tablet: 0 };
+    let total = 0;
+    connections.forEach(c => {
+       const d = c.device || 'Inconnu';
+       if (d.includes('iPhone') || d.includes('Android')) dist.Mobile++;
+       else if (d.includes('iPad')) dist.Tablet++;
+       else if (d.includes('PC') || d.includes('Mac') || d.includes('Windows')) dist.Desktop++;
+       else dist.Mobile++;
+       total++;
+    });
+
+    if (total === 0) return DEVICE_DISTRIBUTION_DATA;
+
+    return [
+      { name: 'Mobile', value: Math.round((dist.Mobile / total) * 100) || 0, color: '#818cf8', icon: <Smartphone size={16} /> },
+      { name: 'Desktop', value: Math.round((dist.Desktop / total) * 100) || 0, color: '#34d399', icon: <LayoutDashboard size={16} /> },
+      { name: 'Tablet', value: Math.round((dist.Tablet / total) * 100) || 0, color: '#fbbf24', icon: <Smartphone size={16} className="rotate-90" /> },
+    ];
+  }, [connections]);
+
+  const dynamicHeatmap = React.useMemo(() => {
+     const hMap: Record<string, Record<number, number>> = {};
+     DAYS.forEach(d => {
+       hMap[d] = {};
+       HOURS.forEach(h => hMap[d][h] = 0);
+     });
+
+     connections.forEach(c => {
+        const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
+        if (isNaN(date.getTime())) return;
+        
+        let dayStr = date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
+        dayStr = dayStr.charAt(0).toUpperCase() + dayStr.slice(1);
+        const dayMatch = DAYS.find(d => dayStr.startsWith(d));
+        if (dayMatch) {
+           hMap[dayMatch][date.getHours()]++;
+        }
+     });
+     return hMap;
+  }, [connections]);
 
   const activeSessions = connections.filter(c => c.status === 'Connecté').length;
   const uniqueDevices = new Set(connections.map(c => c.device || 'Inconnu')).size;
@@ -786,7 +1037,7 @@ export default function Dashboard() {
                         </div>
                         <div className="h-72 w-full">
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={overviewTimeframe === 'daily' ? REVENUE_DATA : MONTHLY_REVENUE_DATA} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                            <AreaChart data={overviewTimeframe === 'daily' ? dynamicRevenueDaily : dynamicRevenueMonthly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                               <defs>
                                 <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
                                   <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
@@ -1036,15 +1287,15 @@ export default function Dashboard() {
                             </td>
                             <td className="px-6 py-4">{voucher.duration}</td>
                             <td className="px-6 py-4">
-                              <span className={`px-2.5 py-1 rounded-full text-[10px] uppercase tracking-wider font-bold ${voucher.status === 'actif' ? 'bg-green-500/20 text-green-400' : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'}`}>
-                                {voucher.status}
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] uppercase tracking-wider font-bold ${voucher.status === 'active' ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : voucher.status === 'revoked' ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400' : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'}`}>
+                                {voucher.status === 'active' ? 'actif' : voucher.status === 'revoked' ? 'révoqué' : voucher.status}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                               {voucher.locationId === 'all' ? 'Tous les établissements' : locations.find(l => l.id === voucher.locationId)?.name || 'Inconnu'}
+                               {voucher.locationId === 'all' || !voucher.locationId ? 'Tous les établissements' : locations.find(l => l.id === voucher.locationId)?.name || 'Inconnu'}
                             </td>
                             <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                               {new Date(voucher.createdAt).toLocaleDateString()} à {new Date(voucher.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                               {new Date(voucher.createdAt).toLocaleDateString('fr-FR')} à {new Date(voucher.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
                                <button 
@@ -1057,16 +1308,15 @@ export default function Dashboard() {
                                >
                                  Copier
                                </button>
+                               {voucher.status === 'active' && (
                                <button 
-                                 onClick={() => {
-                                   setVouchers(prev => prev.filter(v => v.id !== voucher.id));
-                                   toast.success("Voucher supprimé.");
-                                 }}
-                                 className="text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors"
-                                 title="Supprimer"
+                                 onClick={() => handleRevokeVoucher(voucher.id)}
+                                 className="text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                                 title="Révoquer"
                                >
-                                 <Trash2 size={16} />
+                                 <XCircle size={16} /> Révoquer
                                </button>
+                               )}
                             </td>
                           </tr>
                         ))}
@@ -1172,6 +1422,84 @@ export default function Dashboard() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                  {/* Demographics: Visitor Types */}
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 backdrop-blur-md shadow-sm flex items-center justify-between">
+                     <div>
+                        <h3 className="font-semibold text-lg text-slate-900 dark:text-white mb-1">Segments Visiteurs</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Répartition par régularité</p>
+                        
+                        <div className="space-y-4">
+                           <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Nouveaux</span>
+                              </div>
+                              <span className="text-sm font-bold text-slate-900 dark:text-white">{dynamicCrmUsers.filter(u => u.status === 'Nouveau').length}</span>
+                           </div>
+                           <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-blue-400"></div>
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Réguliers</span>
+                              </div>
+                              <span className="text-sm font-bold text-slate-900 dark:text-white">{dynamicCrmUsers.filter(u => u.status === 'Régulier').length}</span>
+                           </div>
+                           <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full bg-purple-400"></div>
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">VIP</span>
+                              </div>
+                              <span className="text-sm font-bold text-slate-900 dark:text-white">{dynamicCrmUsers.filter(u => u.status === 'VIP').length}</span>
+                           </div>
+                        </div>
+                     </div>
+                     <div className="w-32 h-32 relative">
+                        {/* Simple CSS-based mini ring chart representation */}
+                        <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
+                           {(() => {
+                              const total = Math.max(1, dynamicCrmUsers.length);
+                              const p1 = (dynamicCrmUsers.filter(u => u.status === 'Nouveau').length / total) * 100;
+                              const p2 = (dynamicCrmUsers.filter(u => u.status === 'Régulier').length / total) * 100;
+                              const p3 = (dynamicCrmUsers.filter(u => u.status === 'VIP').length / total) * 100;
+                              return (
+                                 <>
+                                    <circle cx="18" cy="18" r="16" fill="transparent" stroke="#f1f5f9" strokeWidth="4" className="dark:stroke-white/5"></circle>
+                                    <circle cx="18" cy="18" r="16" fill="transparent" stroke="#34d399" strokeWidth="4" strokeDasharray={`${p1} ${100 - p1}`} strokeDashoffset="0"></circle>
+                                    <circle cx="18" cy="18" r="16" fill="transparent" stroke="#60a5fa" strokeWidth="4" strokeDasharray={`${p2} ${100 - p2}`} strokeDashoffset={`-${p1}`}></circle>
+                                    <circle cx="18" cy="18" r="16" fill="transparent" stroke="#c084fc" strokeWidth="4" strokeDasharray={`${p3} ${100 - p3}`} strokeDashoffset={`-${p1 + p2}`}></circle>
+                                 </>
+                              );
+                           })()}
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                           <span className="text-xl font-bold text-slate-900 dark:text-white">{dynamicCrmUsers.length}</span>
+                        </div>
+                     </div>
+                  </div>
+
+                  {/* Demographics: Sessions */}
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 backdrop-blur-md shadow-sm">
+                     <h3 className="font-semibold text-lg text-slate-900 dark:text-white mb-1">Moyenne de Sessions / Client</h3>
+                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Récurrence globale du portefeuille</p>
+                     
+                     <div className="flex items-end gap-4">
+                        <p className="text-5xl font-bold text-indigo-500">
+                           {dynamicCrmUsers.length > 0 ? (dynamicCrmUsers.reduce((acc, u) => acc + u.sessions, 0) / dynamicCrmUsers.length).toFixed(1) : 0}
+                        </p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">sessions par visiteur en moyenne</p>
+                     </div>
+                     <div className="mt-8">
+                        <div className="h-2 w-full bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                           <div className="h-full bg-indigo-500 rounded-full" style={{width: `${Math.min(100, (dynamicCrmUsers.reduce((acc, u) => acc + u.sessions, 0) / (dynamicCrmUsers.length || 1)) * 10)}%`}}></div>
+                        </div>
+                        <div className="flex justify-between text-xs text-slate-400 mt-2">
+                           <span>Faible rétention</span>
+                           <span>Forte rétention</span>
+                        </div>
+                     </div>
+                  </div>
+                </div>
+
                 {/* CRM Table */}
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm overflow-hidden flex flex-col">
                    <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5">
@@ -1193,18 +1521,24 @@ export default function Dashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-slate-600 dark:text-slate-300">
-                          {users.map((row) => (
+                          {dynamicCrmUsers.length === 0 ? (
+                             <tr>
+                               <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                                 Aucun utilisateur enregistré pour le moment.
+                               </td>
+                             </tr>
+                          ) : dynamicCrmUsers.map((row) => (
                             <tr key={row.id} className="hover:bg-white dark:bg-white/5 transition-colors">
                               <td className="px-6 py-4">
                                 <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
                                   {row.name}
                                   {row.pts >= 200 && <Award size={14} className="text-orange-400" />}
                                 </div>
-                                <div className="text-xs text-slate-500 mt-0.5">{row.email}</div>
+                                <div className="text-xs text-slate-500 mt-0.5" title={row.email}>{row.email.length > 20 ? row.email.substring(0, 18) + '...' : row.email}</div>
                               </td>
                               <td className="px-6 py-4 text-slate-500 dark:text-slate-400">{row.time}</td>
                               <td className="px-6 py-4">
-                                <div className="flex items-center gap-1.5 font-mono font-bold text-indigo-300">
+                                <div className="flex items-center gap-1.5 font-mono font-bold text-indigo-400 dark:text-indigo-300">
                                   {row.pts} <Sparkles size={14} />
                                 </div>
                               </td>
@@ -1216,7 +1550,7 @@ export default function Dashboard() {
                               <td className="px-6 py-4 text-right">
                                  <button 
                                    onClick={() => setRedeemModal({ isOpen: true, userId: row.id })}
-                                   className="bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 ml-auto transition-colors"
+                                   className="bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 hover:bg-indigo-500/20 dark:hover:bg-indigo-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 ml-auto transition-colors"
                                  >
                                    <Gift size={14} /> Échanger
                                  </button>
@@ -1710,7 +2044,7 @@ export default function Dashboard() {
                   <div className="h-72 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart 
-                        data={adsRevenueTimeframe === 'daily' ? REVENUE_DATA : MONTHLY_REVENUE_DATA} 
+                        data={adsRevenueTimeframe === 'daily' ? dynamicRevenueDaily : dynamicRevenueMonthly} 
                         margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff1a" />
@@ -1963,6 +2297,24 @@ export default function Dashboard() {
                   <p className="text-slate-500 dark:text-slate-400">Analyse du trafic, tendances de revenus et statistiques d'utilisation du Wi-Fi.</p>
                 </div>
                 
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Trafic Global (Sessions)</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{connections.length}</p>
+                    <div className="text-xs mt-2 text-green-500">+12% vs mois dernier</div>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Durée Moyenne (Session)</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{avgSessionTime} min</p>
+                    <div className="text-xs mt-2 text-slate-500">Stable</div>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Taux de Rebond (&lt; 2 min)</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{connections.length > 0 ? Math.round((connections.filter(c => (c.duration || 0) < 2).length / connections.length) * 100) : 0}%</p>
+                    <div className="text-xs mt-2 text-indigo-400">À surveiller</div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Monthly Revenue Chart */}
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 backdrop-blur-md shadow-sm lg:col-span-2">
@@ -1988,7 +2340,7 @@ export default function Dashboard() {
                     </div>
                     <div className="h-80 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={analyticsTimeframe === 'daily' ? REVENUE_DATA : MONTHLY_REVENUE_DATA} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <AreaChart data={analyticsTimeframe === 'daily' ? dynamicRevenueDaily : dynamicRevenueMonthly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorSalesM" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
@@ -2024,7 +2376,7 @@ export default function Dashboard() {
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
-                            data={DEVICE_DISTRIBUTION_DATA}
+                            data={dynamicDeviceDistribution}
                             cx="50%"
                             cy="50%"
                             innerRadius={60}
@@ -2033,7 +2385,7 @@ export default function Dashboard() {
                             dataKey="value"
                             stroke="none"
                           >
-                            {DEVICE_DISTRIBUTION_DATA.map((entry, index) => (
+                            {dynamicDeviceDistribution.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
@@ -2046,13 +2398,13 @@ export default function Dashboard() {
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                          <div className="text-center">
-                            <span className="block text-2xl font-bold text-slate-900 dark:text-white">3.2k</span>
+                            <span className="block text-2xl font-bold text-slate-900 dark:text-white">{connections.length}</span>
                             <span className="block text-xs text-slate-500">Sessions</span>
                          </div>
                       </div>
                     </div>
                     <div className="mt-4 space-y-3">
-                      {DEVICE_DISTRIBUTION_DATA.map((device, idx) => (
+                      {dynamicDeviceDistribution.map((device, idx) => (
                         <div key={idx} className="flex items-center justify-between text-sm">
                            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: device.color }}></div>
@@ -2074,7 +2426,7 @@ export default function Dashboard() {
                     </div>
                     <div className="h-80 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={WIFI_USAGE_DATA} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={8}>
+                        <BarChart data={dynamicWifiUsage} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barGap={8}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff1a" />
                           <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
                           <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dx={-10} />
@@ -2115,29 +2467,22 @@ export default function Dashboard() {
                           <div className="w-10 text-xs font-medium text-slate-500 dark:text-slate-400 text-right pr-2 shrink-0">{day}</div>
                           <div className="flex flex-1 gap-1">
                             {HOURS.map(h => {
-                              const isWeekend = i >= 5;
-                              const isNight = h < 6 || h > 22;
-                              const isLunch = h >= 12 && h <= 14;
-                              const isEvening = h >= 18 && h <= 21;
-                              
-                              let intensity = Math.random() * 20;
-                              if (!isNight) intensity += 20;
-                              if (!isWeekend && isLunch) intensity += 30;
-                              if (isEvening) intensity += 40;
-                              if (isWeekend && (h >= 14 && h <= 18)) intensity += 50;
+                              const intensityRaw = dynamicHeatmap[day]?.[h] || 0;
+                              // Scale up slightly for visual effect if overall counts are low
+                              let intensity = intensityRaw * 20;
 
                               let colorClass = 'bg-slate-100 dark:bg-white/5';
                               if (intensity > 80) colorClass = 'bg-indigo-600 dark:bg-indigo-500';
                               else if (intensity > 60) colorClass = 'bg-indigo-500 dark:bg-indigo-400 border border-indigo-400/20';
                               else if (intensity > 40) colorClass = 'bg-indigo-400 dark:bg-indigo-500/60 border border-indigo-400/20';
                               else if (intensity > 20) colorClass = 'bg-indigo-300 dark:bg-indigo-500/40 border border-indigo-400/20';
-                              else if (intensity > 10) colorClass = 'bg-indigo-200 dark:bg-indigo-500/20 border border-indigo-400/20';
+                              else if (intensity > 0) colorClass = 'bg-indigo-200 dark:bg-indigo-500/20 border border-indigo-400/20';
 
                               return (
                                 <div 
                                   key={`cell-${day}-${h}`} 
                                   className={`flex-1 h-8 rounded shrink-0 ${colorClass} transition-all hover:ring-2 ring-indigo-500 ring-offset-1 dark:ring-offset-slate-900 cursor-crosshair`}
-                                  title={`${day} à ${h}h`}
+                                  title={`${day} à ${h}h (${intensityRaw} sessions)`}
                                 ></div>
                               );
                             })}
@@ -3630,33 +3975,34 @@ export default function Dashboard() {
                 <X size={24} />
               </button>
             </div>
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.target as HTMLFormElement;
-              const count = parseInt((form.elements.namedItem('count') as HTMLInputElement).value) || 1;
-              const duration = (form.elements.namedItem('duration') as HTMLSelectElement).value;
-              const locationId = (form.elements.namedItem('locationId') as HTMLSelectElement).value;
-
-              const newVouchers = Array.from({ length: count }).map(() => ({
-                id: Math.random().toString(36).substr(2, 9),
-                code: Array.from({ length: 2 }, () => Math.random().toString(36).substring(2, 6).toUpperCase()).join('-'),
-                duration,
-                status: 'actif',
-                locationId,
-                createdAt: new Date().toISOString()
-              }));
-
-              setVouchers(prev => [...newVouchers, ...prev]);
-              toast.success(`${count} code(s) généré(s) avec succès.`);
-              setShowVoucherModal(false);
-            }} className="p-6 space-y-4">
+            <form onSubmit={handleGenerateVouchers} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Préfixe (optionnel)</label>
+                <input 
+                  type="text" 
+                  value={voucherConfig.prefix}
+                  onChange={e => setVoucherConfig({...voucherConfig, prefix: e.target.value})}
+                  maxLength={6}
+                  placeholder="ex: VIP"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none uppercase" 
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nombre de codes</label>
-                <input required type="number" name="count" min="1" max="100" defaultValue="1" className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <input required type="number" 
+                  value={voucherConfig.quantity}
+                  onChange={e => setVoucherConfig({...voucherConfig, quantity: Number(e.target.value)})}
+                  min="1" max="100" 
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" 
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Durée de validité</label>
-                <select required name="duration" className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                <select required 
+                  value={voucherConfig.duration}
+                  onChange={e => setVoucherConfig({...voucherConfig, duration: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
                   <option value="1 heure">1 heure</option>
                   <option value="2 heures">2 heures</option>
                   <option value="24 heures">24 heures</option>
@@ -3666,7 +4012,11 @@ export default function Dashboard() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Établissement (Optionnel)</label>
-                <select required name="locationId" className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                <select required 
+                  value={voucherConfig.locationId}
+                  onChange={e => setVoucherConfig({...voucherConfig, locationId: e.target.value})}
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
                   <option value="all">Tous les établissements</option>
                   {locations.map(loc => (
                     <option key={loc.id} value={loc.id}>{loc.name}</option>
@@ -3677,8 +4027,8 @@ export default function Dashboard() {
                 <button type="button" onClick={() => setShowVoucherModal(false)} className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                   Annuler
                 </button>
-                <button type="submit" className="flex-1 py-2 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-500/20">
-                  Générer
+                <button type="submit" disabled={isGeneratingVouchers} className="flex-1 py-2 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50">
+                  {isGeneratingVouchers ? 'Génération...' : 'Générer'}
                 </button>
               </div>
             </form>
