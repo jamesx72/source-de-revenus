@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon } from 'lucide-react';
+import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -50,6 +50,7 @@ export default function Dashboard() {
   const [language, setLanguage] = useState<'fr' | 'en'>('fr');
   const t = TRANSLATIONS[language];
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [globalLocationId, setGlobalLocationId] = useState<string>('all');
   const [ratioConfig, setRatioConfig] = useState({ hours: 1, points: 10 });
   const [wifiConfig, setWifiConfig] = useState({ timeLimit: 'unlimited', customTimeLimit: 120, downloadSpeed: 'unlimited', uploadSpeed: 'unlimited', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
   const [portalConfig, setPortalConfig] = useState<{ themeColor: string; logoUrl: string | null }>({ themeColor: '#6366f1', logoUrl: null });
@@ -63,6 +64,22 @@ export default function Dashboard() {
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [isSavingWifiConfig, setIsSavingWifiConfig] = useState(false);
 
+  useEffect(() => {
+    if (locations.length === 0) return;
+    const loc = globalLocationId === 'all' ? locations[0] : locations.find(l => l.id === globalLocationId);
+    if (loc) {
+      if (loc.wifiConfig) {
+        const loadedWifiConfig = loc.wifiConfig;
+        const downloadSpeed = loadedWifiConfig.downloadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
+        const uploadSpeed = loadedWifiConfig.uploadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
+        setWifiConfig(prev => ({ ...prev, ...loadedWifiConfig, downloadSpeed, uploadSpeed }));
+      }
+      if (loc.smtpConfig) {
+        setSmtpConfig(prev => ({ ...prev, ...loc.smtpConfig }));
+      }
+    }
+  }, [globalLocationId, locations]);
+
   const handleSaveWifiConfig = async () => {
     if (!user || locations.length === 0) return;
     setIsSavingWifiConfig(true);
@@ -70,7 +87,9 @@ export default function Dashboard() {
       const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('../firebase');
       
-      const primaryLocation = locations[0];
+      const primaryLocation = globalLocationId === 'all' ? locations[0] : locations.find(l => l.id === globalLocationId);
+      if (!primaryLocation) return;
+      
       const docRef = doc(db, 'locations', primaryLocation.id);
       
       await setDoc(docRef, {
@@ -168,6 +187,44 @@ export default function Dashboard() {
   const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '' });
   const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
   const [aiBrandPrompt, setAiBrandPrompt] = useState('');
+
+  // Pricing Config Modal
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [currentLocationForPricing, setCurrentLocationForPricing] = useState<any>(null);
+  const [pricingConfigPreview, setPricingConfigPreview] = useState({ currency: 'eur', price1h: 2, price24h: 5 });
+  const [isSubmittingPricing, setIsSubmittingPricing] = useState(false);
+
+  const handleSavePricingConfig = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user || !currentLocationForPricing) return;
+    setIsSubmittingPricing(true);
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const docRef = doc(db, 'locations', currentLocationForPricing.id);
+      await setDoc(docRef, {
+        paymentConfig: {
+          currency: pricingConfigPreview.currency,
+          price1h: Number(pricingConfigPreview.price1h),
+          price24h: Number(pricingConfigPreview.price24h)
+        }
+      }, { merge: true });
+      
+      toast.success("Tarifs mis à jour avec succès.");
+      setLocations(prev => prev.map(loc => 
+        loc.id === currentLocationForPricing.id 
+          ? { ...loc, paymentConfig: { ...pricingConfigPreview, price1h: Number(pricingConfigPreview.price1h), price24h: Number(pricingConfigPreview.price24h) } } 
+          : loc
+      ));
+      setShowPricingModal(false);
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erreur lors de la mise à jour des tarifs.");
+    } finally {
+      setIsSubmittingPricing(false);
+    }
+  };
   const [isGeneratingAiTheme, setIsGeneratingAiTheme] = useState(false);
 
   // Notification Config Modal
@@ -216,17 +273,6 @@ export default function Dashboard() {
         setLocations(locs);
         if (locs.length === 0) {
           setShowSetupWizard(true);
-        }
-        if (locs.length > 0) {
-          if (locs[0].wifiConfig) {
-            const loadedWifiConfig = locs[0].wifiConfig;
-            const downloadSpeed = loadedWifiConfig.downloadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
-            const uploadSpeed = loadedWifiConfig.uploadSpeed || loadedWifiConfig.bandwidth || 'unlimited';
-            setWifiConfig(prev => ({ ...prev, ...loadedWifiConfig, downloadSpeed, uploadSpeed }));
-          }
-          if (locs[0].smtpConfig) {
-            setSmtpConfig(prev => ({ ...prev, ...locs[0].smtpConfig }));
-          }
         }
 
         const connectionsQuery = query(
@@ -857,6 +903,14 @@ export default function Dashboard() {
     return <Navigate to="/" replace />;
   }
 
+  const filteredConnections = globalLocationId === 'all' 
+    ? connections 
+    : connections.filter(c => c.locationId === globalLocationId);
+
+  const filteredTransactions = globalLocationId === 'all'
+    ? transactions
+    : transactions.filter(t => t.locationId === globalLocationId);
+
   const { dynamicRevenueDaily, dynamicRevenueWeekly, dynamicRevenueMonthly } = React.useMemo(() => {
     const dailyMap: Record<string, { sales: number, ads: number }> = {};
     const weeklyMap: Record<string, { sales: number, ads: number }> = {};
@@ -868,7 +922,7 @@ export default function Dashboard() {
       return Math.floor(offsetDate / 7) + 1;
     }
 
-    transactions.forEach(t => {
+    filteredTransactions.forEach(t => {
       const date = new Date(t.createdAt);
       if (isNaN(date.getTime())) return;
       let dayStr = date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
@@ -891,7 +945,7 @@ export default function Dashboard() {
       }
     });
 
-    connections.forEach(c => {
+    filteredConnections.forEach(c => {
       const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
       if (isNaN(date.getTime())) return;
       let dayStr = date.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
@@ -932,11 +986,11 @@ export default function Dashboard() {
     }
 
     return { dynamicRevenueDaily: daily, dynamicRevenueWeekly: weekly, dynamicRevenueMonthly: monthly };
-  }, [transactions, connections]);
+  }, [filteredTransactions, filteredConnections]);
 
   const dynamicWifiUsage = React.useMemo(() => {
     const monthsMap: Record<string, { sessions: number, dataGB: number }> = {};
-    connections.forEach(c => {
+    filteredConnections.forEach(c => {
        const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
        if (isNaN(date.getTime())) return;
        const monthStr = date.toLocaleDateString('fr-FR', { month: 'short' });
@@ -951,7 +1005,7 @@ export default function Dashboard() {
        return mos.map(m => ({ name: m, sessions: 0, dataGB: 0 }));
     }
     return usage;
-  }, [connections]);
+  }, [filteredConnections]);
 
   const dynamicRedemptionData = React.useMemo(() => {
     // In a full implementation, you would query a 'redemptions' collection
@@ -962,7 +1016,7 @@ export default function Dashboard() {
   const dynamicDeviceDistribution = React.useMemo(() => {
     const dist: Record<string, number> = { Mobile: 0, Desktop: 0, Tablet: 0 };
     let total = 0;
-    connections.forEach(c => {
+    filteredConnections.forEach(c => {
        const d = c.device || 'Inconnu';
        if (d.includes('iPhone') || d.includes('Android')) dist.Mobile++;
        else if (d.includes('iPad')) dist.Tablet++;
@@ -984,7 +1038,7 @@ export default function Dashboard() {
       { name: 'Desktop', value: Math.round((dist.Desktop / total) * 100) || 0, color: '#34d399', icon: <LayoutDashboard size={16} /> },
       { name: 'Tablet', value: Math.round((dist.Tablet / total) * 100) || 0, color: '#fbbf24', icon: <Smartphone size={16} className="rotate-90" /> },
     ];
-  }, [connections]);
+  }, [filteredConnections]);
 
   const dynamicHeatmap = React.useMemo(() => {
      const hMap: Record<string, Record<number, number>> = {};
@@ -993,7 +1047,7 @@ export default function Dashboard() {
        HOURS.forEach(h => hMap[d][h] = 0);
      });
 
-     connections.forEach(c => {
+     filteredConnections.forEach(c => {
         const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : new Date();
         if (isNaN(date.getTime())) return;
         
@@ -1005,22 +1059,22 @@ export default function Dashboard() {
         }
      });
      return hMap;
-  }, [connections]);
+  }, [filteredConnections]);
 
-  const activeSessions = connections.filter(c => c.status === 'Connecté').length;
-  const uniqueDevices = new Set(connections.map(c => c.device || 'Inconnu')).size;
-  const avgSessionTime = connections.length > 0 
-    ? Math.round(connections.reduce((acc, curr) => acc + (curr.duration || 0), 0) / connections.length) 
+  const activeSessions = filteredConnections.filter(c => c.status === 'Connecté').length;
+  const uniqueDevices = new Set(filteredConnections.map(c => c.device || 'Inconnu')).size;
+  const avgSessionTime = filteredConnections.length > 0 
+    ? Math.round(filteredConnections.reduce((acc, curr) => acc + (curr.duration || 0), 0) / filteredConnections.length) 
     : 0;
 
-  const actualRevenue = transactions.filter(t => t.status === 'paid').reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2);
+  const actualRevenue = filteredTransactions.filter(t => t.status === 'paid').reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2);
 
   const dashboardStats = [
     { label: 'Revenu Total', value: `${actualRevenue} €`, trend: 'Basé sur les transactions', trendColor: 'text-indigo-400' },
     { label: 'Visiteurs Uniques', value: uniqueDevices.toString(), trend: 'Basé sur les appareils', trendColor: 'text-slate-500' },
     { label: 'Utilisateurs Connectés', value: activeSessions.toString(), trend: 'En temps réel', trendColor: 'text-green-400' },
     { label: 'Temps Moyen (Session)', value: `${avgSessionTime} min`,  trend: 'Calculé sur toutes les données', trendColor: 'text-slate-500' },
-    { label: 'Transactions Sécurisées', value: transactions.filter(t => t.status === 'paid').length.toString(), trend: 'Paiements réussis', trendColor: 'text-emerald-500' },
+    { label: 'Transactions Sécurisées', value: filteredTransactions.filter(t => t.status === 'paid').length.toString(), trend: 'Paiements réussis', trendColor: 'text-emerald-500' },
   ];
 
 
@@ -1119,7 +1173,25 @@ export default function Dashboard() {
             </button>
             <div>
               <h1 className="text-xl lg:text-2xl font-bold">{t.dashboard}</h1>
-              <p className="text-xs lg:text-sm text-slate-500 dark:text-slate-400">{t.establishment} <span className="text-indigo-400 font-medium">Le Café Central</span></p>
+              <div className="text-xs lg:text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1">
+                {t.establishment}
+                {locations.length > 1 ? (
+                  <select 
+                    className="bg-transparent text-indigo-500 dark:text-indigo-400 font-medium outline-none border-b border-indigo-400/30 pb-0.5 cursor-pointer max-w-[200px]"
+                    value={globalLocationId}
+                    onChange={(e) => setGlobalLocationId(e.target.value)}
+                  >
+                    <option value="all">Tous</option>
+                    {locations.map(loc => (
+                      <option key={loc.id} value={loc.id}>{loc.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-indigo-400 font-medium">
+                    {locations[0]?.name || "Mon Établissement"}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           
@@ -1966,9 +2038,13 @@ export default function Dashboard() {
                   </div>
                   <button
                     onClick={() => {
-                      setCurrentLocation(null);
-                      setLocationFormError('');
-                      setShowLocationModal(true);
+                      setWizardStep(1);
+                      setWizardData({
+                        name: '', type: 'cafe', address: '',
+                        currency: 'eur', freeDuration: '60', 
+                        price1h: 2, price24h: 5
+                      });
+                      setShowSetupWizard(true);
                     }}
                     className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm"
                   >
@@ -2061,6 +2137,21 @@ export default function Dashboard() {
                               title="Personnaliser le portail"
                             >
                               <Palette size={18} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCurrentLocationForPricing(loc);
+                                setPricingConfigPreview({
+                                  currency: loc.paymentConfig?.currency || 'eur',
+                                  price1h: loc.paymentConfig?.price1h || 2,
+                                  price24h: loc.paymentConfig?.price24h || 5
+                                });
+                                setShowPricingModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/20 rounded-lg transition-colors"
+                              title="Gérer les tarifs"
+                            >
+                              <Tag size={18} />
                             </button>
                             <button
                               onClick={() => handleConnectStripe(loc.id)}
@@ -2698,14 +2789,14 @@ export default function Dashboard() {
                       <CreditCard size={24} />
                     </div>
                     <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Transactions Réussies</h3>
-                    <div className="text-3xl font-bold text-slate-900 dark:text-white">{transactions.filter(t => t.status === 'paid').length}</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">{filteredTransactions.filter(t => t.status === 'paid').length}</div>
                   </div>
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
                     <div className="w-12 h-12 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl flex items-center justify-center mb-4">
                       <Activity size={24} />
                     </div>
                     <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Panier Moyen</h3>
-                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{transactions.length > 0 ? (transactions.reduce((acc, tx) => acc + (tx.amount || 0), 0) / transactions.length).toFixed(2) : '0.00'}</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{filteredTransactions.length > 0 ? (filteredTransactions.reduce((acc, tx) => acc + (tx.amount || 0), 0) / filteredTransactions.length).toFixed(2) : '0.00'}</div>
                   </div>
                 </div>
 
@@ -2726,7 +2817,7 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-white/10">
-                        {transactions.map((tx, idx) => (
+                        {filteredTransactions.map((tx, idx) => (
                           <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                             <td className="px-6 py-4">
                               <span className="text-sm font-medium text-slate-900 dark:text-white">{new Date(tx.createdAt).toLocaleString('fr-FR')}</span>
@@ -2735,7 +2826,7 @@ export default function Dashboard() {
                               <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{tx.sessionId?.substring(0, 16) || tx.id}...</span>
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
-                              Le Café Central
+                              {tx.locationId ? locations.find(l => l.id === tx.locationId)?.name || 'Inconnu' : 'Inconnu'}
                             </td>
                             <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
                               €{Number(tx.amount || 0).toFixed(2)}
@@ -2768,12 +2859,12 @@ export default function Dashboard() {
                   <p className="text-slate-500 dark:text-slate-400">Analyse du trafic, tendances de revenus et statistiques d'utilisation du Wi-Fi.</p>
                 </div>
                 
-                <DashboardAnalytics transactions={transactions} />
+                <DashboardAnalytics transactions={filteredTransactions} />
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Trafic Global (Sessions)</p>
-                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{connections.length}</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{filteredConnections.length}</p>
                     <div className="text-xs mt-2 text-green-500">+12% vs mois dernier</div>
                   </div>
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
@@ -4966,6 +5057,64 @@ export default function Dashboard() {
                        <CheckCircle2 size={18} />
                     </>
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pricing Modal */}
+      {showPricingModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Gérer les Tarifs</h3>
+              <button onClick={() => setShowPricingModal(false)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm">
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSavePricingConfig} className="p-6 space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Devise</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button type="button" onClick={() => setPricingConfigPreview({...pricingConfigPreview, currency: 'eur'})} className={`py-2 rounded-xl flex items-center justify-center font-bold text-sm border-2 transition-colors ${pricingConfigPreview.currency === 'eur' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-transparent bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'}`}>
+                    € EUR
+                  </button>
+                  <button type="button" onClick={() => setPricingConfigPreview({...pricingConfigPreview, currency: 'usd'})} className={`py-2 rounded-xl flex items-center justify-center font-bold text-sm border-2 transition-colors ${pricingConfigPreview.currency === 'usd' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-transparent bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'}`}>
+                    $ USD
+                  </button>
+                  <button type="button" onClick={() => setPricingConfigPreview({...pricingConfigPreview, currency: 'gbp'})} className={`py-2 rounded-xl flex items-center justify-center font-bold text-sm border-2 transition-colors ${pricingConfigPreview.currency === 'gbp' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-transparent bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'}`}>
+                    £ GBP
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 1 Heure</label>
+                   <div className="relative">
+                      <input type="number" min="0" step="0.5" required value={pricingConfigPreview.price1h} onChange={(e) => setPricingConfigPreview({...pricingConfigPreview, price1h: Number(e.target.value)})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl pl-9 px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 font-medium">
+                        {pricingConfigPreview.currency === 'usd' ? '$' : pricingConfigPreview.currency === 'gbp' ? '£' : '€'}
+                      </span>
+                   </div>
+                </div>
+                <div>
+                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 24 Heures</label>
+                   <div className="relative">
+                      <input type="number" min="0" step="0.5" required value={pricingConfigPreview.price24h} onChange={(e) => setPricingConfigPreview({...pricingConfigPreview, price24h: Number(e.target.value)})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl pl-9 px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 font-medium">
+                        {pricingConfigPreview.currency === 'usd' ? '$' : pricingConfigPreview.currency === 'gbp' ? '£' : '€'}
+                      </span>
+                   </div>
+                </div>
+              </div>
+              <div className="pt-4 flex justify-end gap-3">
+                <button type="button" onClick={() => setShowPricingModal(false)} className="px-4 py-2 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                  Annuler
+                </button>
+                <button type="submit" disabled={isSubmittingPricing} className="flex justify-center items-center gap-2 px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium disabled:opacity-50 transition-colors">
+                  {isSubmittingPricing ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : 'Enregistrer'}
                 </button>
               </div>
             </form>
