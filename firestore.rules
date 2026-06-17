@@ -2,11 +2,10 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global Default Deny
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
-
+    
     // Helper functions
     function isAuthenticated() {
       return request.auth != null;

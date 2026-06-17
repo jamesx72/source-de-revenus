@@ -3,12 +3,57 @@ import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, Chev
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { GoogleAuthProvider, FacebookAuthProvider, signInWithPopup } from 'firebase/auth';
 import { loadStripe } from '@stripe/stripe-js';
-import { EmbeddedCheckoutProvider, EmbeddedCheckout } from '@stripe/react-stripe-js';
+import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
 const stripePromise = loadStripe((import.meta as any).env.VITE_STRIPE_PUBLIC_KEY || '');
+
+function CheckoutForm() {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!stripe || !elements) {
+      return;
+    }
+
+    setIsProcessing(true);
+
+    const { error } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/portal?locationId=${new URLSearchParams(window.location.search).get('locationId')}&payment_success=true`,
+      },
+    });
+
+    if (error) {
+      setErrorMessage(error.message || 'Une erreur est survenue.');
+    }
+
+    setIsProcessing(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <PaymentElement />
+      {errorMessage && <div className="text-red-500 text-sm">{errorMessage}</div>}
+      <button 
+        type="submit" 
+        disabled={!stripe || isProcessing}
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-lg font-bold flex justify-center mt-4"
+      >
+        {isProcessing ? 'Traitement en cours...' : 'Payer'}
+      </button>
+    </form>
+  );
+}
 
 export default function CaptivePortal() {
   const [searchParams] = useSearchParams();
@@ -23,6 +68,7 @@ export default function CaptivePortal() {
   
   const [locationName, setLocationName] = useState('Le Café Central');
   const [portalConfig, setPortalConfig] = useState<any>(null);
+  const [paymentConfig, setPaymentConfig] = useState({ currency: 'eur', price1h: 2, price24h: 5 });
   const [locationOwnerId, setLocationOwnerId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -38,37 +84,57 @@ export default function CaptivePortal() {
     const fetchLocation = async () => {
       // payment handling check
       if (searchParams.get('payment_success') === 'true') {
-         setPaymentCode(Math.random().toString(36).substring(2, 10).toUpperCase());
-         setStep('payment_success');
-         // We do not run simulate ad, we manually log it.
-         if (locationId) {
+         const paymentIntentId = searchParams.get('payment_intent');
+         if (paymentIntentId) {
             try {
-              const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-              const { db } = await import('../firebase');
-              const ua = navigator.userAgent;
-              let os = "Inconnu";
-              let deviceType = "Appareil";
-              if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
-              else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
-              else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
-              
-              if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
-              else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
-              else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+               const res = await fetch('/api/verify-payment', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ payment_intent: paymentIntentId })
+               });
+               const data = await res.json();
+               if (data.voucherCode) {
+                 setPaymentCode(data.voucherCode);
+                 setStep('payment_success');
 
-              await addDoc(collection(db, 'connections'), {
-                locationId,
-                locationName: 'Location Paid',
-                userId: null,
-                device: deviceType,
-                os,
-                duration: 120, // 2H premium
-                connectedAt: serverTimestamp(),
-                status: 'Connecté'
-              });
+                 // We do not run simulate ad, we manually log it.
+                 if (locationId) {
+                    try {
+                      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+                      const { db } = await import('../firebase');
+                      const ua = navigator.userAgent;
+                      let os = "Inconnu";
+                      let deviceType = "Appareil";
+                      if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+                      else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+                      else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+                      
+                      if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+                      else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+                      else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+
+                      await addDoc(collection(db, 'connections'), {
+                        locationId,
+                        locationName: 'Location Paid',
+                        userId: locationOwnerId,
+                        device: deviceType,
+                        os,
+                        duration: 120, // 2H premium approx
+                        connectedAt: serverTimestamp(),
+                        status: 'Connecté'
+                      });
+                    } catch (err) {
+                      console.error("Failed to log connection:", err);
+                    }
+                 }
+               }
             } catch (err) {
-              console.error("Failed to log connection:", err);
+               console.error("Failed to verify payment intent", err);
             }
+         } else {
+             // Fallback if no payment_intent (for embedded checkout logic)
+             setPaymentCode(Math.random().toString(36).substring(2, 10).toUpperCase());
+             setStep('payment_success');
          }
       }
 
@@ -89,6 +155,9 @@ export default function CaptivePortal() {
           if (data.portalConfig) {
             setPortalConfig(data.portalConfig);
           }
+          if (data.paymentConfig) {
+            setPaymentConfig(data.paymentConfig);
+          }
         }
       } catch (err) {
         console.error("Error fetching location for portal:", err);
@@ -103,15 +172,19 @@ export default function CaptivePortal() {
   const handleCheckout = async (basePriceAmount: number, passName: string) => {
     setIsProcessingPayment(true);
     try {
-      const res = await fetch('/api/create-checkout-session', {
+      const clientMac = searchParams.get('mac') || searchParams.get('client_mac') || searchParams.get('id') || 'unknown-mac';
+
+      const res = await fetch('/api/create-payment-intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
            priceAmount: basePriceAmount, 
+           currency: paymentConfig.currency || 'eur',
            passName, 
            locationId, 
            userId: locationOwnerId,
-           discountCode: appliedPromo?.code || ''
+           discountCode: appliedPromo?.code || '',
+           clientMac
         })
       });
       const data = await res.json();
@@ -159,6 +232,55 @@ export default function CaptivePortal() {
     } finally {
        setIsApplyingPromo(true);
        setTimeout(() => setIsApplyingPromo(false), 500); // Visual feedback
+    }
+  };
+
+  const handleSocialLogin = async (providerName: 'google' | 'facebook') => {
+    try {
+      const provider = providerName === 'google' ? new GoogleAuthProvider() : new FacebookAuthProvider();
+      if (providerName === 'google') {
+          provider.addScope('email');
+          provider.addScope('profile');
+      }
+      
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      setStep('success');
+
+      if (locationId) {
+        try {
+          const ua = navigator.userAgent;
+          let os = "Inconnu";
+          let deviceType = "Appareil";
+          if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+          else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+          else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+          
+          if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+          else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+          else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+
+          await addDoc(collection(db, 'connections'), {
+            locationId,
+            locationName,
+            userId: locationOwnerId,
+            customerEmail: user.email || null,
+            customerName: user.displayName || null,
+            authProvider: providerName,
+            device: deviceType,
+            os,
+            duration: sessionDuration,
+            connectedAt: serverTimestamp(),
+            status: 'Connecté'
+          });
+        } catch (err) {
+            console.error("Failed to log social connection:", err);
+        }
+      }
+    } catch (error) {
+      console.error(`${providerName} login error:`, error);
+      alert(`Erreur de connexion avec ${providerName}`);
     }
   };
 
@@ -249,7 +371,8 @@ export default function CaptivePortal() {
   }, [timeLeft, hasShownExpiryWarning]);
 
   const getDisplayPrice = (baseCents: number) => {
-    if (!appliedPromo) return (baseCents / 100).toFixed(2) + " €";
+    const symbol = paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€';
+    if (!appliedPromo) return (baseCents / 100).toFixed(2) + " " + symbol;
     let newCents = baseCents;
     if (appliedPromo.type === 'percentage') {
        newCents = Math.max(0, Math.round(baseCents * (1 - (appliedPromo.value / 100))));
@@ -258,7 +381,7 @@ export default function CaptivePortal() {
     }
     // Stripe minimum handled on backend but for display we can show 0 or exact. Backend caps at 50 cents.
     if (newCents > 0 && newCents < 50) newCents = 50; 
-    return (newCents / 100).toFixed(2) + " €";
+    return (newCents / 100).toFixed(2) + " " + symbol;
   };
 
   const formatTime = (seconds: number) => {
@@ -353,7 +476,7 @@ export default function CaptivePortal() {
                   {portalConfig?.allowExtension && (
                     <div className="w-full space-y-3 mb-6">
                       <button 
-                        onClick={() => handleCheckout(200, "Premium 2 Heures")}
+                        onClick={() => handleCheckout((paymentConfig.price1h || 2) * 100, "Premium 2 Heures")}
                         disabled={isProcessingPayment}
                         className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
                       >
@@ -362,12 +485,12 @@ export default function CaptivePortal() {
                           <p className="text-xs text-slate-500 opacity-80">Haut débit sans publicité</p>
                        </div>
                        <div className="font-bold flex items-center gap-2">
-                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">2.00 €</span>}
-                        {getDisplayPrice(200)}
+                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">{(paymentConfig.price1h || 2).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
+                        {getDisplayPrice((paymentConfig.price1h || 2) * 100)}
                        </div>
                       </button>
                       <button 
-                        onClick={() => handleCheckout(500, "Pass Journée")}
+                        onClick={() => handleCheckout((paymentConfig.price24h || 5) * 100, "Pass Journée")}
                         disabled={isProcessingPayment}
                         className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
                       >
@@ -376,8 +499,8 @@ export default function CaptivePortal() {
                           <p className="text-xs text-slate-500 opacity-80">Accès illimité 24h</p>
                        </div>
                        <div className="font-bold flex items-center gap-2">
-                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">5.00 €</span>}
-                        {getDisplayPrice(500)}
+                        {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">{(paymentConfig.price24h || 5).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
+                        {getDisplayPrice((paymentConfig.price24h || 5) * 100)}
                        </div>
                       </button>
                     </div>
@@ -424,10 +547,10 @@ export default function CaptivePortal() {
                       <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
                     </div>
                     <div className="flex gap-4 max-w-[200px] mx-auto">
-                      <button onClick={simulateAd} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/30 text-[#1877F2] hover:bg-[#1877F2]/20 transition-colors">
+                      <button onClick={() => handleSocialLogin('facebook')} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/30 text-[#1877F2] hover:bg-[#1877F2]/20 transition-colors">
                         <Facebook size={20} />
                       </button>
-                      <button onClick={simulateAd} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
+                      <button onClick={() => handleSocialLogin('google')} className="flex-1 p-3 flex justify-center items-center rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors">
                         <svg className="w-5 h-5" viewBox="0 0 24 24">
                           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -663,12 +786,12 @@ export default function CaptivePortal() {
 
                 <div className="flex-1 w-full overflow-y-auto" id="checkout">
                    {clientSecret ? (
-                      <EmbeddedCheckoutProvider
+                      <Elements
                         stripe={stripePromise}
-                        options={{ clientSecret }}
+                        options={{ clientSecret, appearance: { theme: 'stripe' } }}
                       >
-                        <EmbeddedCheckout />
-                      </EmbeddedCheckoutProvider>
+                        <CheckoutForm />
+                      </Elements>
                    ) : (
                       <div className="flex items-center justify-center h-full">
                          <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />

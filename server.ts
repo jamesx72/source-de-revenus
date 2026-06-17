@@ -2,17 +2,19 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
-import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs, doc, getDoc, updateDoc, query, where } from "firebase/firestore";
+import { initializeApp as initializeAdminApp, applicationDefault } from 'firebase-admin/app';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import fs from "fs";
 
-// Initialize Firebase Client SDK for server-side operations (Stripe webhooks)
+// Initialize Firebase Admin Client SDK for server-side operations (Stripe webhooks)
 let db: any = null;
 try {
-  const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8'));
-  const app = initializeApp(firebaseConfig, "server-app");
-  db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  console.log("Firebase Client SDK initialized on server.");
+  const adminApp = initializeAdminApp({
+    projectId: "studio-8479066300-24a9a",
+    credential: applicationDefault()
+  });
+  db = getAdminFirestore(adminApp, "ai-studio-e122ace1-e8ea-43ff-9de3-8dcb4cf686e6");
+  console.log("Firebase Admin Client SDK initialized on server.");
 } catch (err: any) {
   console.log("Skipping Firebase server initialization: ", err.message);
 }
@@ -48,41 +50,64 @@ async function startServer() {
         return res.status(400).send(`Webhook Error: ${err.message}`);
       }
 
-      if (event.type === 'checkout.session.completed') {
-        const session = event.data.object as any;
-        console.log('Payment was successful for session:', session.id);
+      if (event.type === 'checkout.session.completed' || event.type === 'payment_intent.succeeded') {
+        let session: any;
+        let amount_total: number;
+        let currency: string;
+        let payment_status: string;
+        let customer_email: string | null = null;
+        let metadata: any;
+
+        if (event.type === 'checkout.session.completed') {
+            session = event.data.object as any;
+            amount_total = session.amount_total;
+            currency = session.currency;
+            payment_status = session.payment_status;
+            customer_email = session.customer_details?.email || null;
+            metadata = session.metadata || {};
+        } else {
+            session = event.data.object as any;
+            amount_total = session.amount;
+            currency = session.currency;
+            payment_status = session.status === 'succeeded' ? 'paid' : session.status;
+            customer_email = session.receipt_email || null;
+            metadata = session.metadata || {};
+        }
+
+        console.log(`Payment was successful for: ${session.id}`);
         
         if (db) {
           try {
-            await addDoc(collection(db, 'transactions'), {
+            await db.collection('transactions').add({
               sessionId: session.id,
-              amount: session.amount_total / 100, // Amount in units instead of cents
-              currency: session.currency,
-              status: session.payment_status,
-              customerEmail: session.customer_details?.email || null,
-              locationId: session.metadata?.locationId || null,
-              userId: session.metadata?.userId || null,
+              amount: amount_total / 100, // Amount in units instead of cents
+              currency: currency,
+              status: payment_status,
+              customerEmail: customer_email,
+              locationId: metadata?.locationId || null,
+              userId: metadata?.userId || null,
               createdAt: new Date().toISOString(),
             });
             console.log(`Transaction ${session.id} recorded successfully.`);
             
             // Increment discount uses if a code was used
-            if (session.metadata?.discountCode && session.metadata?.locationId) {
-                const discountsRef = collection(db, 'discounts');
-                const q = query(discountsRef, where('code', '==', session.metadata.discountCode), where('locationId', '==', session.metadata.locationId));
-                const snapshot = await getDocs(q);
+            if (metadata?.discountCode && metadata?.locationId) {
+                const discountsRef = db.collection('discounts');
+                const snapshot = await discountsRef.where('code', '==', metadata.discountCode)
+                                                   .where('locationId', '==', metadata.locationId)
+                                                   .get();
                 if (!snapshot.empty) {
                    const discountDoc = snapshot.docs[0];
-                   await updateDoc(doc(db, 'discounts', discountDoc.id), {
+                   await discountDoc.ref.update({
                       uses: (discountDoc.data().uses || 0) + 1
                    });
                 }
             }
             
             // Automated Email Notifications
-            if (session.metadata?.locationId) {
-              const locationDoc = await getDoc(doc(db, 'locations', session.metadata.locationId));
-              if (locationDoc.exists()) {
+            if (metadata?.locationId) {
+              const locationDoc = await db.collection('locations').doc(metadata.locationId).get();
+              if (locationDoc.exists) {
                  const locationData = locationDoc.data();
                  const smtpConfig = locationData.smtpConfig || {};
                  
@@ -98,9 +123,41 @@ async function startServer() {
                          }
                      });
                      
-                     const customerEmail = session.customer_details?.email;
-                     const amountInUnits = session.amount_total / 100;
-                     const currency = session.currency.toUpperCase();
+                     const customerEmail = customer_email;
+                     const amountInUnits = amount_total / 100;
+                     const currencyStr = currency.toUpperCase();
+                     
+                     // Ensure voucher exists for this payment intent / session
+                     let voucherCode = '';
+                     try {
+                         const vouchersRef = db.collection('vouchers');
+                         const existingSnap = await vouchersRef.where('stripeSessionId', '==', session.id).get();
+                         if (!existingSnap.empty) {
+                             voucherCode = existingSnap.docs[0].data().code;
+                         } else {
+                             const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+                             for (let i = 0; i < 8; i++) {
+                               voucherCode += characters.charAt(Math.floor(Math.random() * characters.length));
+                             }
+                             let duration = 120;
+                             if (metadata?.passName && metadata.passName.includes('Heures')) {
+                                 const match = metadata.passName.match(/(\d+)\s*Heures/);
+                                 if (match && match[1]) {
+                                    duration = parseInt(match[1]) * 60;
+                                 }
+                             }
+                             await vouchersRef.add({
+                                code: voucherCode,
+                                duration: duration,
+                                locationId: metadata?.locationId || '',
+                                status: 'active',
+                                stripeSessionId: session.id,
+                                createdAt: new Date().toISOString()
+                             });
+                         }
+                     } catch (err) {
+                         console.error("Failed to generate voucher in webhook:", err);
+                     }
                      
                      // Send Receipt to Customer
                      if (customerEmail) {
@@ -108,19 +165,22 @@ async function startServer() {
                            await transporter.sendMail({
                                from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
                                to: customerEmail,
-                               subject: "Votre reçu de paiement Wi-Fi",
+                               subject: "Votre code d'accès Wi-Fi",
                                html: `
                                  <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
                                    <div style="background-color: #6366f1; padding: 20px; text-align: center; color: white;">
-                                     <h2>Reçu de paiement</h2>
+                                     <h2>Reçu de paiement & Code d'accès</h2>
                                    </div>
                                    <div style="padding: 20px;">
                                      <p>Bonjour,</p>
-                                     <p>Merci pour votre achat. Voici votre reçu pour l'accès Wi-Fi.</p>
-                                     <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                                       <strong>Montant payé:</strong> ${amountInUnits} ${currency}
+                                     <p>Merci pour votre achat. Voici votre code pour l'accès Wi-Fi :</p>
+                                     <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+                                       <span style="font-size: 24px; font-weight: bold; letter-spacing: 2px; color: #6366f1; font-family: monospace;">${voucherCode}</span>
                                      </div>
-                                     <p>Vous avez maintenant accès au réseau. Pensez à conserver cet email comme preuve d'achat.</p>
+                                     <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                                       <strong>Montant payé :</strong> ${amountInUnits} ${currencyStr}
+                                     </div>
+                                     <p>Vous avez maintenant accès au réseau. Conservez cet email.</p>
                                      <p>Cordialement,<br/>L'équipe ${smtpConfig.fromName}</p>
                                    </div>
                                  </div>
@@ -138,7 +198,7 @@ async function startServer() {
                           await transporter.sendMail({
                                from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
                                to: smtpConfig.fromEmail, // send to the business owner
-                               subject: `🟢 Nouvelle transaction importante (${amountInUnits} ${currency})`,
+                               subject: `🟢 Nouvelle transaction importante (${amountInUnits} ${currencyStr})`,
                                html: `
                                  <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333; border: 1px solid #e2e8f0; border-radius: 8px;">
                                    <div style="background-color: #10b981; padding: 15px; text-align: center; color: white; border-top-left-radius: 8px; border-top-right-radius: 8px;">
@@ -147,7 +207,7 @@ async function startServer() {
                                    <div style="padding: 20px;">
                                      <p>Une nouvelle transaction d'un montant élevé vient d'être validée sur votre portail.</p>
                                      <ul style="padding-left: 20px;">
-                                       <li><strong>Montant:</strong> ${amountInUnits} ${currency}</li>
+                                       <li><strong>Montant:</strong> ${amountInUnits} ${currencyStr}</li>
                                        <li><strong>Client:</strong> ${customerEmail || 'Non renseigné'}</li>
                                        <li><strong>Session Stripe:</strong> <code style="background: #f1f5f9; padding: 2px 4px;">${session.id}</code></li>
                                      </ul>
@@ -167,14 +227,23 @@ async function startServer() {
                  if (locationData.radiusWebhookUrl) {
                     try {
                        console.log(`Triggering Radius integration for MAC auth at ${locationData.radiusWebhookUrl}`);
+                       let duration = metadata?.duration || 120;
+                       if (metadata?.passName && metadata.passName.includes('Heures')) {
+                           const match = metadata.passName.match(/(\d+)\s*Heures/);
+                           if (match && match[1]) {
+                              duration = parseInt(match[1]) * 60;
+                           }
+                       }
+                       
                        await fetch(locationData.radiusWebhookUrl, {
                          method: 'POST',
                          headers: { 'Content-Type': 'application/json' },
                          body: JSON.stringify({
                              action: 'authorize',
-                             mac: 'client-mac-address', // Typically passed in session.metadata or gathered during portal login
-                             duration: session.metadata.duration || 60,
-                             locationId: session.metadata.locationId
+                             mac: metadata?.clientMac || '',
+                             duration: duration,
+                             locationId: metadata?.locationId,
+                             passName: metadata?.passName || ''
                          })
                        });
                        console.log('Radius integration webhook sent.');
@@ -285,9 +354,9 @@ async function startServer() {
          return res.status(500).json({ error: "Database not initialized" });
       }
       
-      const locRef = doc(db, 'locations', locationId);
-      const locDoc = await getDoc(locRef);
-      if (!locDoc.exists()) return res.status(404).json({ error: "Location not found" });
+      const locRef = db.collection('locations').doc(locationId);
+      const locDoc = await locRef.get();
+      if (!locDoc.exists) return res.status(404).json({ error: "Location not found" });
       
       const locationData = locDoc.data();
       let accountId = locationData.stripeAccountId;
@@ -302,7 +371,7 @@ async function startServer() {
           },
         });
         accountId = account.id;
-        await updateDoc(locRef, { stripeAccountId: accountId });
+        await locRef.update({ stripeAccountId: accountId });
       }
 
       const appUrl = process.env.APP_URL || "http://localhost:3000";
@@ -318,6 +387,161 @@ async function startServer() {
       res.json({ url: accountLink.url });
     } catch (e: any) {
       console.error(e);
+      res.status(500).json({ error: e.message || "Unknown error" });
+    }
+  });
+
+  app.post("/api/create-payment-intent", async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY environment variable. Please configure it in your secrets." });
+      }
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      const { locationId, userId, discountCode, clientMac } = req.body;
+      let { priceAmount, passName, currency } = req.body;
+      currency = currency || 'eur';
+
+      // Apply discount if provided
+      if (discountCode && db) {
+        const discountsRef = db.collection('discounts');
+        const snapshot = await discountsRef.where('code', '==', discountCode)
+                                           .where('locationId', '==', locationId)
+                                           .where('status', '==', 'active')
+                                           .get();
+        if (!snapshot.empty) {
+          const discountDoc = snapshot.docs[0];
+          const discount = discountDoc.data();
+          if (discount.maxUses === null || discount.uses < discount.maxUses) {
+            if (discount.type === 'percentage') {
+              priceAmount = Math.max(0, Math.round(priceAmount * (1 - (discount.value / 100))));
+            } else if (discount.type === 'flat') {
+              priceAmount = Math.max(0, priceAmount - (discount.value * 100));
+            }
+          }
+        }
+      }
+
+      if (priceAmount > 0 && priceAmount < 50) priceAmount = 50;
+      if (priceAmount === 0) priceAmount = 50;
+
+      let transfer_data: any = undefined;
+      if (db && locationId) {
+        const locDoc = await db.collection('locations').doc(locationId).get();
+        if (locDoc.exists) {
+          const locData = locDoc.data();
+          if (locData.stripeAccountId) {
+            const transferAmount = Math.round(priceAmount * 0.8);
+            if (transferAmount > 0) {
+                transfer_data = {
+                  destination: locData.stripeAccountId,
+                };
+            }
+          }
+        }
+      }
+
+      const intentOpts: any = {
+        amount: priceAmount,
+        currency: currency,
+        automatic_payment_methods: {
+          enabled: true,
+        },
+        metadata: {
+          locationId: locationId || '',
+          userId: userId || '',
+          discountCode: discountCode || '',
+          passName: passName || '',
+          clientMac: clientMac || ''
+        }
+      };
+
+      if (transfer_data) {
+         intentOpts.application_fee_amount = priceAmount - Math.round(priceAmount * 0.8);
+         intentOpts.transfer_data = transfer_data;
+      }
+
+      const paymentIntent = await stripe.paymentIntents.create(intentOpts);
+
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Unknown Stripe error" });
+    }
+  });
+
+  app.post("/api/verify-payment", async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY environment variable." });
+      }
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      const { payment_intent } = req.body;
+      if (!payment_intent) {
+        return res.status(400).json({ error: "Missing payment_intent" });
+      }
+
+      const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent);
+      if (paymentIntent.status !== 'succeeded') {
+        return res.status(400).json({ error: "Payment not succeeded", status: paymentIntent.status });
+      }
+
+      if (!db) {
+         return res.status(500).json({ error: "Database not initialized" });
+      }
+
+      // Check if voucher already exists for this payment intent
+      const vouchersRef = db.collection('vouchers');
+      const existingVoucherSnap = await vouchersRef.where('stripeSessionId', '==', payment_intent).get();
+      
+      if (!existingVoucherSnap.empty) {
+         const existingVoucher = existingVoucherSnap.docs[0].data();
+         return res.json({ voucherCode: existingVoucher.code });
+      }
+
+      // Generate new voucher
+      const metadata = paymentIntent.metadata || {};
+      const locationId = metadata.locationId || '';
+      
+      // Extract duration from pass name or default to 120 (2h)
+      let duration = 120;
+      if (metadata.passName && metadata.passName.includes('Heures')) {
+          const match = metadata.passName.match(/(\d+)\s*Heures/);
+          if (match && match[1]) {
+             duration = parseInt(match[1]) * 60;
+          }
+      }
+
+      const generateCode = () => {
+        const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 8; i++) {
+          code += characters.charAt(Math.floor(Math.random() * characters.length));
+        }
+        return code;
+      };
+
+      const newCode = generateCode();
+
+      await vouchersRef.add({
+        code: newCode,
+        duration: duration,
+        locationId: locationId,
+        status: 'active',
+        stripeSessionId: payment_intent,
+        createdAt: new Date().toISOString()
+      });
+
+      res.json({ voucherCode: newCode });
+    } catch (e: any) {
+      console.error("Error verifying payment:", e);
       res.status(500).json({ error: e.message || "Unknown error" });
     }
   });
@@ -339,9 +563,11 @@ async function startServer() {
 
       // Apply discount if provided
       if (discountCode && db) {
-        const discountsRef = collection(db, 'discounts');
-        const q = query(discountsRef, where('code', '==', discountCode), where('locationId', '==', locationId), where('status', '==', 'active'));
-        const snapshot = await getDocs(q);
+        const discountsRef = db.collection('discounts');
+        const snapshot = await discountsRef.where('code', '==', discountCode)
+                                           .where('locationId', '==', locationId)
+                                           .where('status', '==', 'active')
+                                           .get();
         if (!snapshot.empty) {
           const discountDoc = snapshot.docs[0];
           const discount = discountDoc.data();
@@ -371,8 +597,8 @@ async function startServer() {
       let transfer_data: any = undefined;
       // Configure sub-merchant payout via Stripe Connect if applicable.
       if (db && locationId) {
-        const locDoc = await getDoc(doc(db, 'locations', locationId));
-        if (locDoc.exists()) {
+        const locDoc = await db.collection('locations').doc(locationId).get();
+        if (locDoc.exists) {
           const locData = locDoc.data();
           if (locData.stripeAccountId) {
             // Keep 20% platform fee, 80% to the affiliated location sub-merchant.

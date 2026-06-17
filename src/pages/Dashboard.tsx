@@ -6,6 +6,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
 import { SortableWidget } from '../components/SortableWidget';
 import { LocationsMapView } from '../components/LocationsMap';
+import { DashboardAnalytics } from '../components/DashboardAnalytics';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -146,6 +147,15 @@ export default function Dashboard() {
   const [discountConfig, setDiscountConfig] = useState({ code: '', type: 'percentage', value: 10, maxUses: 100, locationId: '' });
   const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [wizardData, setWizardData] = useState({
+    name: '', type: 'cafe', address: '',
+    currency: 'eur', freeDuration: '60', 
+    price1h: 2, price24h: 5
+  });
+  const [isSubmittingWizard, setIsSubmittingWizard] = useState(false);
+
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
   const [locationFormError, setLocationFormError] = useState('');
@@ -204,6 +214,9 @@ export default function Dashboard() {
           lastHeartbeat: Date.now() - (idx === 0 ? 30000 : 360000) 
         })) as any[];
         setLocations(locs);
+        if (locs.length === 0) {
+          setShowSetupWizard(true);
+        }
         if (locs.length > 0) {
           if (locs[0].wifiConfig) {
             const loadedWifiConfig = locs[0].wifiConfig;
@@ -299,6 +312,47 @@ export default function Dashboard() {
     };
   }, [user]);
 
+  const handleFinishWizard = async () => {
+    if (!user) return;
+    setIsSubmittingWizard(true);
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const newLocRef = await addDoc(collection(db, 'locations'), {
+        name: wizardData.name || 'Mon Établissement',
+        type: wizardData.type,
+        address: wizardData.address,
+        userId: user.uid,
+        wifiConfig: {
+          timeLimit: wizardData.freeDuration === 'unlimited' ? 'unlimited' : 'custom',
+          customTimeLimit: parseInt(wizardData.freeDuration) || 60,
+          downloadSpeed: 'unlimited',
+          uploadSpeed: 'unlimited', 
+          autoRenew: false,
+          macBypassEnabled: false
+        },
+        paymentConfig: {
+          currency: wizardData.currency,
+          price1h: wizardData.price1h,
+          price24h: wizardData.price24h
+        },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setShowSetupWizard(false);
+      
+      const eventInfo = new CustomEvent('toast', { detail: 'Configuration initiale terminée avec succès!'});
+      window.dispatchEvent(eventInfo);
+    } catch (err: any) {
+      console.error(err);
+      const eventInfo = new CustomEvent('toast-error', { detail: 'Erreur lors de la configuration.'});
+      window.dispatchEvent(eventInfo);
+    } finally {
+      setIsSubmittingWizard(false);
+    }
+  };
+
   const handleSaveLocation = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user) return;
@@ -309,9 +363,10 @@ export default function Dashboard() {
     const name = formData.get('name') as string;
     const type = formData.get('type') as string;
     const address = formData.get('address') as string;
+    const radiusWebhookUrl = formData.get('radiusWebhookUrl') as string;
 
     if (!name || !type || !address) {
-      setLocationFormError('Veuillez remplir tous les champs.');
+      setLocationFormError('Veuillez remplir tous les champs obligatoires.');
       setIsSubmittingLocation(false);
       return;
     }
@@ -326,6 +381,7 @@ export default function Dashboard() {
           name,
           type,
           address,
+          radiusWebhookUrl: radiusWebhookUrl || null,
           userId: user.uid,
           createdAt: currentLocation.createdAt || serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -336,6 +392,7 @@ export default function Dashboard() {
           name,
           type,
           address,
+          radiusWebhookUrl: radiusWebhookUrl || null,
           userId: user.uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -657,14 +714,19 @@ export default function Dashboard() {
     const userMap: Record<string, { id: string, name: string, email: string, lastTime: Date | null, sessions: number, durationTotal: number, pts: number }> = {};
     
     connections.forEach(c => {
-       const deviceKey = c.device || 'Inconnu';
+       const userKey = c.customerEmail || c.device || 'Inconnu';
        const date = c.connectedAt ? new Date(c.connectedAt.toDate ? c.connectedAt.toDate() : c.connectedAt) : null;
        
-       if (!userMap[deviceKey]) {
-          userMap[deviceKey] = {
-             id: deviceKey,
-             name: `Appareil ${deviceKey}`,
-             email: '-',
+       if (!userMap[userKey]) {
+          let name = c.customerName || `Appareil ${c.device || 'Inconnu'}`;
+          if (!c.customerName && c.customerEmail) {
+             name = 'Client ' + c.customerEmail.split('@')[0];
+          }
+
+          userMap[userKey] = {
+             id: userKey,
+             name: name,
+             email: c.customerEmail || '-',
              lastTime: date,
              sessions: 0,
              durationTotal: 0,
@@ -672,12 +734,12 @@ export default function Dashboard() {
           };
        }
        
-       userMap[deviceKey].sessions += 1;
-       userMap[deviceKey].durationTotal += c.duration || 60; // default 60 min
-       if (date && userMap[deviceKey].lastTime && date > userMap[deviceKey].lastTime) {
-          userMap[deviceKey].lastTime = date;
-       } else if (!userMap[deviceKey].lastTime) {
-          userMap[deviceKey].lastTime = date;
+       userMap[userKey].sessions += 1;
+       userMap[userKey].durationTotal += c.duration || 60; // default 60 min
+       if (date && userMap[userKey].lastTime && date > userMap[userKey].lastTime) {
+          userMap[userKey].lastTime = date;
+       } else if (!userMap[userKey].lastTime) {
+          userMap[userKey].lastTime = date;
        }
     });
 
@@ -2706,6 +2768,8 @@ export default function Dashboard() {
                   <p className="text-slate-500 dark:text-slate-400">Analyse du trafic, tendances de revenus et statistiques d'utilisation du Wi-Fi.</p>
                 </div>
                 
+                <DashboardAnalytics transactions={transactions} />
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Trafic Global (Sessions)</p>
@@ -4429,7 +4493,7 @@ export default function Dashboard() {
                 <X size={24} />
               </button>
             </div>
-            <div className="p-8 flex flex-col items-center justify-center gap-4 text-center">
+            <div id="voucher-print-element" className="p-8 flex flex-col items-center justify-center gap-4 text-center bg-white dark:bg-[#050614]">
                <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center">
                  <Wifi className="text-slate-500 dark:text-slate-400" size={32} />
                </div>
@@ -4455,12 +4519,35 @@ export default function Dashboard() {
                  Durée de validité : <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.duration}</span>
                </div>
             </div>
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden">
+            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3">
                <button 
                  onClick={() => window.print()}
-                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                >
-                 <QrCode size={18} /> Lancer l'impression
+                 <QrCode size={18} /> Imprimer
+               </button>
+               <button 
+                 onClick={async () => {
+                   try {
+                     const html2canvas = (await import('html2canvas')).default;
+                     const jsPDF = (await import('jspdf')).default;
+                     const element = document.getElementById('voucher-print-element');
+                     if (element) {
+                       const canvas = await html2canvas(element, { scale: 2 });
+                       const imgData = canvas.toDataURL('image/png');
+                       const pdf = new jsPDF('p', 'pt', 'a4');
+                       const pdfWidth = pdf.internal.pageSize.getWidth();
+                       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                       pdf.save(`voucher-${selectedVoucherForPrint.code}.pdf`);
+                     }
+                   } catch (err) {
+                     console.error("Failed to generate PDF", err);
+                   }
+                 }}
+                 className="flex-1 bg-white hover:bg-slate-50 text-indigo-600 border border-indigo-200 dark:bg-[#0f172a] dark:hover:bg-slate-800 dark:text-indigo-400 dark:border-indigo-500/30 font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+               >
+                 <Download size={18} /> PDF
                </button>
             </div>
           </div>
@@ -4625,6 +4712,160 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Business Setup Wizard */}
+      <AnimatePresence>
+        {showSetupWizard && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl border border-slate-200 dark:border-white/10"
+            >
+              <div className="p-8 border-b border-slate-100 dark:border-white/5 relative bg-slate-50 dark:bg-white/5">
+                 <div className="absolute top-8 right-8 text-sm font-semibold text-slate-400">Étape {wizardStep}/3</div>
+                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Bienvenue sur votre portail</h2>
+                 <p className="text-slate-500 dark:text-slate-400">Configurons votre premier établissement et vos préférences de paiement.</p>
+              </div>
+              
+              <div className="p-8">
+                 {/* Step 1: Establishment */}
+                 {wizardStep === 1 && (
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                       <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">1. Votre Établissement</h3>
+                       <div className="space-y-4">
+                          <div>
+                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Nom de l'établissement</label>
+                             <input type="text" value={wizardData.name} onChange={e => setWizardData({...wizardData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ex: Le Café de Paris" autoFocus />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Type</label>
+                               <select value={wizardData.type} onChange={e => setWizardData({...wizardData, type: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                 <option value="cafe">Café</option>
+                                 <option value="restaurant">Restaurant</option>
+                                 <option value="hotel">Hôtel</option>
+                                 <option value="coworking">Coworking</option>
+                                 <option value="retail">Boutique</option>
+                               </select>
+                            </div>
+                            <div>
+                               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Adresse</label>
+                               <input type="text" value={wizardData.address} onChange={e => setWizardData({...wizardData, address: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Ville ou adresse" />
+                            </div>
+                          </div>
+                       </div>
+                    </motion.div>
+                 )}
+
+                 {/* Step 2: Wi-Fi Plans */}
+                 {wizardStep === 2 && (
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                       <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">2. Forfaits Wi-Fi</h3>
+                       <div className="space-y-6">
+                          <div>
+                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Durée de l'accès Gratuit (Minutes)</label>
+                             <select value={wizardData.freeDuration} onChange={e => setWizardData({...wizardData, freeDuration: e.target.value})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                               <option value="30">30 minutes</option>
+                               <option value="60">1 heure</option>
+                               <option value="120">2 heures</option>
+                               <option value="unlimited">Illimité</option>
+                             </select>
+                          </div>
+                          
+                          <div className="bg-slate-50 dark:bg-white/5 rounded-2xl p-4 border border-slate-200 dark:border-white/10">
+                            <h4 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500" /> Options Payantes</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                               <div>
+                                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Prix Pass 1h</label>
+                                 <div className="relative">
+                                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                     <span className="text-slate-500 dark:text-slate-400">{wizardData.currency === 'eur' ? '€' : wizardData.currency === 'usd' ? '$' : '£'}</span>
+                                   </div>
+                                   <input type="number" min="0" value={wizardData.price1h} onChange={e => setWizardData({...wizardData, price1h: parseFloat(e.target.value)||0})} className="w-full pl-8 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                 </div>
+                               </div>
+                               <div>
+                                 <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Prix Pass 24h</label>
+                                 <div className="relative">
+                                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                     <span className="text-slate-500 dark:text-slate-400">{wizardData.currency === 'eur' ? '€' : wizardData.currency === 'usd' ? '$' : '£'}</span>
+                                   </div>
+                                   <input type="number" min="0" value={wizardData.price24h} onChange={e => setWizardData({...wizardData, price24h: parseFloat(e.target.value)||0})} className="w-full pl-8 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                 </div>
+                               </div>
+                            </div>
+                          </div>
+                       </div>
+                    </motion.div>
+                 )}
+
+                 {/* Step 3: Payment Prefs */}
+                 {wizardStep === 3 && (
+                    <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                       <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6">3. Préférences de Paiement</h3>
+                       <div className="space-y-6">
+                          <div>
+                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Devise Principale</label>
+                             <div className="grid grid-cols-3 gap-3">
+                                <button onClick={() => setWizardData({...wizardData, currency: 'eur'})} className={`py-3 rounded-xl border flex items-center justify-center gap-2 font-medium transition-colors ${wizardData.currency === 'eur' ? 'bg-indigo-50 dark:bg-indigo-500/20 border-indigo-500 text-indigo-700 dark:text-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50'}`}>
+                                  € EUR
+                                </button>
+                                <button onClick={() => setWizardData({...wizardData, currency: 'usd'})} className={`py-3 rounded-xl border flex items-center justify-center gap-2 font-medium transition-colors ${wizardData.currency === 'usd' ? 'bg-indigo-50 dark:bg-indigo-500/20 border-indigo-500 text-indigo-700 dark:text-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50'}`}>
+                                  $ USD
+                                </button>
+                                <button onClick={() => setWizardData({...wizardData, currency: 'gbp'})} className={`py-3 rounded-xl border flex items-center justify-center gap-2 font-medium transition-colors ${wizardData.currency === 'gbp' ? 'bg-indigo-50 dark:bg-indigo-500/20 border-indigo-500 text-indigo-700 dark:text-indigo-400' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-50'}`}>
+                                  £ GBP
+                                </button>
+                             </div>
+                             <p className="text-xs text-slate-500 mt-3">Cette devise sera utilisée pour tous les paiements (Stripe) sur le portail captif pour cet établissement.</p>
+                          </div>
+                          
+                          <div className="flex items-center gap-3 p-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 rounded-xl">
+                            <CheckCircle2 size={24} className="shrink-0" />
+                            <p className="text-sm font-medium">Tout est prêt ! Vous pourrez configurer vos clés API Stripe plus tard dans les paramètres.</p>
+                          </div>
+                       </div>
+                    </motion.div>
+                 )}
+              </div>
+              
+              <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-[#050614] flex justify-between">
+                 <button 
+                   onClick={() => wizardStep > 1 ? setWizardStep(wizardStep - 1) : setShowSetupWizard(false)} 
+                   className="px-6 py-2 rounded-xl text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-200 dark:hover:bg-white/5 transition-colors"
+                 >
+                   {wizardStep === 1 ? 'Ignorer' : 'Retour'}
+                 </button>
+                 <button 
+                   onClick={() => {
+                     if (wizardStep < 3) {
+                       if (wizardStep === 1 && !wizardData.name) {
+                          const eventInfo = new CustomEvent('toast-error', { detail: "Veuillez entrer le nom de l'établissement."});
+                          window.dispatchEvent(eventInfo);
+                          return;
+                       }
+                       setWizardStep(wizardStep + 1);
+                     } else {
+                       handleFinishWizard();
+                     }
+                   }}
+                   disabled={isSubmittingWizard}
+                   className="px-6 py-2 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                 >
+                   {isSubmittingWizard ? 'Création...' : wizardStep < 3 ? 'Continuer' : 'Terminer'}
+                   {wizardStep < 3 && <ArrowRight size={16} />}
+                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Location Modal */}
       {showLocationModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -4686,6 +4927,21 @@ export default function Dashboard() {
                   defaultValue={currentLocation?.address || ''}
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                   placeholder="Ex: 123 Rue de la Paix, 75000 Paris"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL du Webhook Radius (Optionnel)</label>
+                <div className="flex bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 p-3 rounded-lg text-xs mb-3 items-start gap-2">
+                   <Server size={14} className="shrink-0 mt-0.5" />
+                   <p>Alertez votre routeur UniFi / MikroTik / Cisco lors d'un paiement ou de la création d'un voucher.</p>
+                </div>
+                <input 
+                  type="url" 
+                  name="radiusWebhookUrl"
+                  defaultValue={currentLocation?.radiusWebhookUrl || ''}
+                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+                  placeholder="Ex: https://votre-controleur.com/api/auth"
                 />
               </div>
               
