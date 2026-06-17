@@ -159,6 +159,7 @@ export default function Dashboard() {
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
   const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
   const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any>(null);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
 
   const [discounts, setDiscounts] = useState<any[]>([]);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
@@ -410,6 +411,9 @@ export default function Dashboard() {
     const type = formData.get('type') as string;
     const address = formData.get('address') as string;
     const radiusWebhookUrl = formData.get('radiusWebhookUrl') as string;
+    const currency = formData.get('currency') as string || 'eur';
+    const price1h = Number(formData.get('price1h')) || 2;
+    const price24h = Number(formData.get('price24h')) || 5;
 
     if (!name || !type || !address) {
       setLocationFormError('Veuillez remplir tous les champs obligatoires.');
@@ -421,27 +425,31 @@ export default function Dashboard() {
       const { doc, setDoc, addDoc, collection, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('../firebase');
       
-      if (currentLocation) {
-        const docRef = doc(db, 'locations', currentLocation.id);
-        await setDoc(docRef, {
+      const locationData = {
           name,
           type,
           address,
           radiusWebhookUrl: radiusWebhookUrl || null,
           userId: user.uid,
+          paymentConfig: {
+              currency,
+              price1h,
+              price24h
+          },
+          updatedAt: serverTimestamp()
+      };
+
+      if (currentLocation) {
+        const docRef = doc(db, 'locations', currentLocation.id);
+        await setDoc(docRef, {
+          ...locationData,
           createdAt: currentLocation.createdAt || serverTimestamp(),
-          updatedAt: serverTimestamp(),
         }, { merge: true });
         toast.success("Établissement mis à jour avec succès.");
       } else {
         await addDoc(collection(db, 'locations'), {
-          name,
-          type,
-          address,
-          radiusWebhookUrl: radiusWebhookUrl || null,
-          userId: user.uid,
+          ...locationData,
           createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
         });
         toast.success("Nouvel établissement ajouté.");
       }
@@ -1502,10 +1510,10 @@ export default function Dashboard() {
                         </div>
                         <div className="flex-1 overflow-auto pr-2 -mr-2">
                           <div className="space-y-4">
-                            {connections.filter(c => c.status === 'Connecté').length === 0 ? (
+                            {filteredConnections.filter(c => c.status === 'Connecté').length === 0 ? (
                                <div className="text-center py-8 text-slate-500 dark:text-slate-400 italic text-sm">Aucune session active en ce moment.</div>
                             ) : (
-                               connections.filter(c => c.status === 'Connecté').map((log) => {
+                               filteredConnections.filter(c => c.status === 'Connecté').map((log) => {
                                   let durationNum = log.duration;
                                   if (typeof durationNum === 'string') {
                                      durationNum = parseInt(durationNum.replace(/[^0-9]/g, '')) || 0;
@@ -2498,12 +2506,12 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-600 dark:text-slate-300">
-                        {connections.length === 0 ? (
+                        {filteredConnections.length === 0 ? (
                            <tr>
                              <td colSpan={6} className="px-6 py-8 text-center text-slate-500">Aucune connexion enregistrée.</td>
                            </tr>
                         ) : (
-                          connections.map((log) => {
+                          filteredConnections.map((log) => {
                              const isConnected = log.status === 'Connecté';
                              const statusColor = isConnected ? 'bg-green-500/20 text-green-500' : 'bg-slate-500/20 text-slate-500 dark:text-slate-400';
                              const start = log.connectedAt ? new Date(log.connectedAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '...';
@@ -2781,7 +2789,7 @@ export default function Dashboard() {
                       <DollarSign size={24} />
                     </div>
                     <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">Revenu Total</h3>
-                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{transactions.reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2)}</div>
+                    <div className="text-3xl font-bold text-slate-900 dark:text-white">€{filteredTransactions.reduce((acc, tx) => acc + (tx.amount || 0), 0).toFixed(2)}</div>
                     <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-2 flex items-center gap-1"><ArrowUpRight size={14} /> +12.5% vs mois dernier</p>
                   </div>
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-6 shadow-sm">
@@ -2838,7 +2846,7 @@ export default function Dashboard() {
                             </td>
                           </tr>
                         ))}
-                        {transactions.length === 0 && (
+                        {filteredTransactions.length === 0 && (
                           <tr>
                             <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
                               Aucune transaction pour le moment.
@@ -2874,7 +2882,7 @@ export default function Dashboard() {
                   </div>
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-3xl backdrop-blur-md">
                     <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">Taux de Rebond (&lt; 2 min)</p>
-                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{connections.length > 0 ? Math.round((connections.filter(c => (c.duration || 0) < 2).length / connections.length) * 100) : 0}%</p>
+                    <p className="text-3xl font-bold text-slate-900 dark:text-white">{filteredConnections.length > 0 ? Math.round((filteredConnections.filter(c => (c.duration || 0) < 2).length / filteredConnections.length) * 100) : 0}%</p>
                     <div className="text-xs mt-2 text-indigo-400">À surveiller</div>
                   </div>
                 </div>
@@ -2962,7 +2970,7 @@ export default function Dashboard() {
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                          <div className="text-center">
-                            <span className="block text-2xl font-bold text-slate-900 dark:text-white">{connections.length}</span>
+                            <span className="block text-2xl font-bold text-slate-900 dark:text-white">{filteredConnections.length}</span>
                             <span className="block text-xs text-slate-500">Sessions</span>
                          </div>
                       </div>
@@ -4574,43 +4582,59 @@ export default function Dashboard() {
 
       {/* Print Voucher Modal */}
       {selectedVoucherForPrint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all">
-          <div className="bg-white dark:bg-[#050614] print:bg-white rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl print:border-none print:shadow-none print-only-voucher">
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all ${isPreviewMode ? 'overflow-y-auto items-start pt-8 pb-8' : ''}`}>
+          <div className={`bg-white dark:bg-[#050614] print:bg-white rounded-3xl w-full overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl print:border-none print:shadow-none print-only-voucher transition-all ${isPreviewMode ? 'max-w-[794px] my-auto' : 'max-w-md'}`}>
             <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 print:hidden">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                Imprimer le Voucher
-              </h3>
-              <button onClick={() => setSelectedVoucherForPrint(null)} className="text-slate-400 hover:text-slate-500">
-                <X size={24} />
+              <div className="flex items-center gap-4">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white hidden sm:block">
+                  Imprimer le Voucher
+                </h3>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white sm:hidden">
+                  Imprimer
+                </h3>
+                <button 
+                  onClick={() => setIsPreviewMode(!isPreviewMode)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border ${isPreviewMode ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 border-indigo-200 dark:border-indigo-500/30' : 'bg-white dark:bg-slate-800 text-slate-600 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/80'}`}
+                >
+                  <Eye size={16} /> <span className="hidden sm:inline">Aperçu</span> A4
+                </button>
+              </div>
+              <button onClick={() => { setSelectedVoucherForPrint(null); setIsPreviewMode(false); }} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm flex-shrink-0">
+                <X size={18} />
               </button>
             </div>
-            <div id="voucher-print-element" className="p-8 flex flex-col items-center justify-center gap-4 text-center bg-white dark:bg-[#050614]">
-               <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center">
-                 <Wifi className="text-slate-500 dark:text-slate-400" size={32} />
-               </div>
-               <div>
-                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white print:text-black">Accès Wi-Fi Client</h2>
-                 <p className="text-slate-500 dark:text-slate-400 print:text-gray-500 mt-1">Scannez le QR code ou utilisez le code manuel</p>
-               </div>
-               
-               <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm my-4">
-                 <QRCodeSVG 
-                    value={`https://portal.example.com/login?code=${selectedVoucherForPrint.code}`}
-                    size={160} 
-                    level={"H"}
-                    includeMargin={false}
-                 />
-               </div>
-               
-               <div className="bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-4 rounded-xl w-full border border-dashed border-slate-300 dark:border-slate-600 print:border-gray-300">
-                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wider mb-2">Code d'accès sécurisé</p>
-                 <div className="font-mono text-3xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black">{selectedVoucherForPrint.code}</div>
-               </div>
-               <div className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-                 Durée de validité : <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.duration}</span>
-               </div>
+            
+            <div className={`bg-slate-100 dark:bg-black/20 print:bg-white ${isPreviewMode ? 'p-6 flex justify-center' : ''}`}>
+              <div id="voucher-print-element" className={`flex flex-col items-center gap-4 text-center bg-white dark:bg-[#050614] print:bg-white transition-all origin-top mx-auto ${isPreviewMode ? 'w-[794px] min-h-[1123px] shadow-2xl scale-[0.4] sm:scale-[0.6] md:scale-75 lg:scale-90 xl:scale-100 transform-gpu pt-24' : 'w-full p-8'}`}>
+                 <div className="flex flex-col items-center justify-center w-full max-w-sm mx-auto">
+                   <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-slate-200/50 dark:border-white/5">
+                     <Wifi className="text-slate-500 dark:text-slate-400" size={36} />
+                   </div>
+                   <div>
+                     <h2 className="text-3xl font-bold text-slate-900 dark:text-white print:text-black mb-2 tracking-tight">Accès Wi-Fi Client</h2>
+                     <p className="text-slate-500 dark:text-slate-400 print:text-gray-500 text-base">Scannez le QR code ou utilisez le code manuel</p>
+                   </div>
+                   
+                   <div className="p-6 bg-white border border-slate-200 rounded-3xl shadow-sm my-8">
+                     <QRCodeSVG 
+                        value={`https://portal.example.com/login?code=${selectedVoucherForPrint.code}`}
+                        size={200} 
+                        level={"H"}
+                        includeMargin={false}
+                     />
+                   </div>
+                   
+                   <div className="bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-6 rounded-2xl w-full border-2 border-dashed border-slate-300 dark:border-slate-600 print:border-gray-300 mb-6">
+                     <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-widest mb-3">Code d'accès sécurisé</p>
+                     <div className="font-mono text-5xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black">{selectedVoucherForPrint.code}</div>
+                   </div>
+                   <div className="text-base text-slate-500 dark:text-slate-400">
+                     Durée de validité : <span className="font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-lg ml-2">{selectedVoucherForPrint.duration}</span>
+                   </div>
+                 </div>
+              </div>
             </div>
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3">
+            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3 relative z-10">
                <button 
                  onClick={() => window.print()}
                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
@@ -5034,6 +5058,39 @@ export default function Dashboard() {
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
                   placeholder="Ex: https://votre-controleur.com/api/auth"
                 />
+              </div>
+
+              <div className="h-px bg-slate-200 dark:bg-white/10 w-full my-4"></div>
+              
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Devise Principale</label>
+                <div className="relative">
+                  <select 
+                    name="currency"
+                    defaultValue={currentLocation?.paymentConfig?.currency || 'eur'}
+                    className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl pl-4 pr-10 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors appearance-none"
+                  >
+                    <option value="eur">€ Euro (EUR)</option>
+                    <option value="usd">$ US Dollar (USD)</option>
+                    <option value="gbp">£ British Pound (GBP)</option>
+                  </select>
+                  <ChevronRight size={16} className="absolute right-4 top-4 text-slate-400 rotate-90" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 1 Heure</label>
+                   <div className="relative">
+                      <input type="number" name="price1h" min="0" step="0.5" required defaultValue={currentLocation?.paymentConfig?.price1h || 2} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
+                   </div>
+                </div>
+                <div>
+                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 24 Heures</label>
+                   <div className="relative">
+                      <input type="number" name="price24h" min="0" step="0.5" required defaultValue={currentLocation?.paymentConfig?.price24h || 5} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
+                   </div>
+                </div>
               </div>
               
               <div className="pt-4 flex gap-3">
