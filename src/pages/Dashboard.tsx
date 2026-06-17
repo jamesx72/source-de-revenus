@@ -106,6 +106,7 @@ export default function Dashboard() {
   const [connections, setConnections] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [vouchers, setVouchers] = useState<any[]>([]);
+  const [platformSubscription, setPlatformSubscription] = useState<any>(null);
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
   const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
@@ -150,9 +151,53 @@ export default function Dashboard() {
   const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
   const [currentLocationForPortal, setCurrentLocationForPortal] = useState<any>(null);
   const [isSubmittingPortalConfig, setIsSubmittingPortalConfig] = useState(false);
-  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '', adMediaType: 'image', adMediaUrl: '', adDuration: 5 });
+  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '', adMediaType: 'image', adMediaUrl: '', adDuration: 5, backgroundImageUrl: '', backgroundVideoUrl: '', fontFamily: 'Inter' });
   const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Router Config Modal
+  const [showRouterConfigModal, setShowRouterConfigModal] = useState(false);
+  const [currentLocationForRouter, setCurrentLocationForRouter] = useState<any>(null);
+  const [routerConfigForm, setRouterConfigForm] = useState({
+     routerType: 'mikrotik',
+     controllerUrl: '',
+     siteId: '',
+     nasId: '',
+     sharedSecret: ''
+  });
+
+  const handleSaveRouterConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRouter(true);
+    try {
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      const docRef = doc(db, 'locations', currentLocationForRouter.id);
+      
+      const newRouterConfig = { ...routerConfigForm };
+
+      await setDoc(docRef, {
+        routerConfig: newRouterConfig,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      
+      toast.success("Configuration routeur mise à jour.");
+      
+      setLocations(prev => prev.map(loc => 
+        loc.id === currentLocationForRouter.id 
+          ? { ...loc, routerConfig: newRouterConfig } 
+          : loc
+      ));
+      
+      setShowRouterConfigModal(false);
+      setCurrentLocationForRouter(null);
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erreur lors de la mise à jour du routeur.");
+    } finally {
+      setIsSavingRouter(false);
+    }
+  };
   
   useEffect(() => {
     if (previewIframeRef.current && showPortalConfigModal) {
@@ -251,6 +296,36 @@ export default function Dashboard() {
     }
   }, [globalLocationId, locations]);
 
+  const [isSubscribingToPlatform, setIsSubscribingToPlatform] = useState(false);
+  const handleSubscribeToPlatform = async (priceId: string) => {
+    if (!user) return;
+    setIsSubscribingToPlatform(true);
+    try {
+      const response = await fetch('/api/create-platform-subscription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          userEmail: user.email,
+          priceId: priceId
+        })
+      });
+      const data = await response.json();
+      if (data.url) {
+         window.location.href = data.url;
+      } else {
+         toast.error(data.error || 'Une erreur est survenue.');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Impossible de contacter le serveur.');
+    } finally {
+      setIsSubscribingToPlatform(false);
+    }
+  };
+
   const handleSaveWifiConfig = async () => {
     if (!user || locations.length === 0) return;
     setIsSavingWifiConfig(true);
@@ -298,6 +373,7 @@ export default function Dashboard() {
     let unsubscribeTransactions: (() => void) | undefined;
     let unsubscribeVouchers: (() => void) | undefined;
     let unsubscribeDiscounts: (() => void) | undefined;
+    let unsubscribeSubscriptions: (() => void) | undefined;
     async function fetchLocations() {
       if (!user) {
         setIsDataLoading(false);
@@ -305,7 +381,7 @@ export default function Dashboard() {
       }
       setIsLoadingLocations(true);
       try {
-        const { collection, getDocs, query, where, orderBy, onSnapshot } = await import('firebase/firestore');
+        const { collection, getDocs, query, where, orderBy, limit, onSnapshot } = await import('firebase/firestore');
         const { db } = await import('../firebase');
         const q = query(
           collection(db, 'locations'),
@@ -384,6 +460,25 @@ export default function Dashboard() {
            console.error("Error fetching discounts in real-time:", error);
         });
 
+        const subscriptionsQuery = query(
+          collection(db, 'subscriptions'),
+          where('userId', '==', user.uid),
+          orderBy('createdAt', 'desc'),
+          limit(1)
+        );
+        unsubscribeSubscriptions = onSnapshot(subscriptionsQuery, (snapshot) => {
+          if (!snapshot.empty) {
+            setPlatformSubscription({
+              id: snapshot.docs[0].id,
+              ...snapshot.docs[0].data()
+            });
+          } else {
+            setPlatformSubscription(null);
+          }
+        }, (error) => {
+          console.error("Error fetching subscriptions in real-time:", error);
+        });
+
       } catch (err: any) {
         console.error("Failed to fetch locations:", err);
       } finally {
@@ -403,6 +498,9 @@ export default function Dashboard() {
       }
       if (unsubscribeDiscounts) {
         unsubscribeDiscounts();
+      }
+      if (unsubscribeSubscriptions) {
+        unsubscribeSubscriptions();
       }
     };
   }, [user]);
@@ -562,15 +660,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveRouterConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingRouter(true);
-    setTimeout(() => {
-      setIsSavingRouter(false);
-      toast.success("Configuration routeur mise à jour et redirection automatisée avec succès.");
-    }, 1000);
-  };
-
   const handleGenerateVouchers = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsGeneratingVouchers(true);
@@ -704,7 +793,10 @@ export default function Dashboard() {
         redirectUrl: portalConfigPreview.redirectUrl || null,
         adMediaType: portalConfigPreview.adMediaType || 'image',
         adMediaUrl: portalConfigPreview.adMediaUrl || null,
-        adDuration: portalConfigPreview.adDuration || 5
+        adDuration: portalConfigPreview.adDuration || 5,
+        backgroundImageUrl: portalConfigPreview.backgroundImageUrl || null,
+        backgroundVideoUrl: portalConfigPreview.backgroundVideoUrl || null,
+        fontFamily: portalConfigPreview.fontFamily || 'Inter'
       };
 
       await setDoc(docRef, {
@@ -1203,14 +1295,34 @@ export default function Dashboard() {
                 {item.label}
               </button>
             ))}
+            <button
+               onClick={() => { setActiveTab('subscription'); setIsMobileMenuOpen(false); }}
+               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl mt-2 text-sm font-medium transition-colors ${
+                 activeTab === 'subscription' 
+                   ? 'bg-gradient-to-r from-pink-500/10 to-purple-500/10 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30' 
+                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white border border-transparent'
+                 }`}
+             >
+               <Ticket size={18} />
+               Abonnement Pro
+             </button>
           </nav>
         </div>
         
         <div className="p-4 border-t border-slate-200 dark:border-white/10 shrink-0 mt-auto">
-          <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl mb-4">
-            <p className="text-xs text-indigo-300 font-medium uppercase tracking-wider mb-2">Plan Business</p>
-            <p className="text-xs text-slate-600 dark:text-slate-300">Renouvellement: 01 Juil.</p>
-          </div>
+          {platformSubscription?.status === 'active' ? (
+            <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl mb-4">
+              <p className="text-xs text-indigo-500 dark:text-indigo-300 font-medium uppercase tracking-wider mb-2 flex items-center gap-1">
+                <CheckCircle2 size={14} /> Plan Business Pro
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-400">Renouvellement: {new Date(platformSubscription.currentPeriodEnd).toLocaleDateString()}</p>
+            </div>
+          ) : (
+            <div className="p-4 bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl mb-4">
+              <p className="text-xs text-slate-700 dark:text-slate-300 font-medium uppercase tracking-wider mb-2">Plan Gratuit</p>
+              <button onClick={() => { setActiveTab('subscription'); setIsMobileMenuOpen(false); }} className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Passer Pro</button>
+            </div>
+          )}
           <button 
             onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${activeTab === 'profile' ? 'bg-indigo-50 dark:bg-white/10 text-indigo-600 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'}`}
@@ -2327,7 +2439,10 @@ export default function Dashboard() {
                                   redirectUrl: loc.portalConfig?.redirectUrl || '',
                                   adMediaType: loc.portalConfig?.adMediaType || 'image',
                                   adMediaUrl: loc.portalConfig?.adMediaUrl || '',
-                                  adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5
+                                  adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5,
+                                  backgroundImageUrl: loc.portalConfig?.backgroundImageUrl || '',
+                                  backgroundVideoUrl: loc.portalConfig?.backgroundVideoUrl || '',
+                                  fontFamily: loc.portalConfig?.fontFamily || 'Inter'
                                 });
                                 setShowPortalConfigModal(true);
                               }}
@@ -2335,6 +2450,23 @@ export default function Dashboard() {
                               title="Personnaliser le portail"
                             >
                               <Palette size={18} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCurrentLocationForRouter(loc);
+                                setRouterConfigForm({
+                                  routerType: loc.routerConfig?.routerType || 'mikrotik',
+                                  controllerUrl: loc.routerConfig?.controllerUrl || '',
+                                  siteId: loc.routerConfig?.siteId || '',
+                                  nasId: loc.routerConfig?.nasId || '',
+                                  sharedSecret: loc.routerConfig?.sharedSecret || ''
+                                });
+                                setShowRouterConfigModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/20 rounded-lg transition-colors"
+                              title="Configuration matérielle et routeur"
+                            >
+                              <Router size={18} />
                             </button>
                             <button
                               onClick={() => {
@@ -2448,19 +2580,38 @@ export default function Dashboard() {
                                 redirectUrl: loc.portalConfig?.redirectUrl || '',
                                 adMediaType: loc.portalConfig?.adMediaType || 'image',
                                 adMediaUrl: loc.portalConfig?.adMediaUrl || '',
-                                adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5
+                                adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5,
+                                backgroundImageUrl: loc.portalConfig?.backgroundImageUrl || '',
+                                backgroundVideoUrl: loc.portalConfig?.backgroundVideoUrl || '',
+                                fontFamily: loc.portalConfig?.fontFamily || 'Inter'
                               });
                               setShowPortalConfigModal(true);
                             }}
                             className="w-full flex items-center justify-center gap-2 bg-pink-50 text-pink-600 dark:bg-pink-500/10 dark:text-pink-400 hover:bg-pink-100 dark:hover:bg-pink-500/20 py-3 rounded-xl text-sm font-semibold transition-colors"
                           >
                             <Palette size={18} /> Personnaliser
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                           </button>
+                           <button
+                             onClick={() => {
+                               setCurrentLocationForRouter(loc);
+                               setRouterConfigForm({
+                                 routerType: loc.routerConfig?.routerType || 'mikrotik',
+                                 controllerUrl: loc.routerConfig?.controllerUrl || '',
+                                 siteId: loc.routerConfig?.siteId || '',
+                                 nasId: loc.routerConfig?.nasId || '',
+                                 sharedSecret: loc.routerConfig?.sharedSecret || ''
+                               });
+                               setShowRouterConfigModal(true);
+                             }}
+                             className="w-full flex items-center justify-center gap-2 bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-500/20 py-3 rounded-xl text-sm font-semibold transition-colors mt-2"
+                           >
+                             <Router size={18} /> Configuration
+                           </button>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 )}
               </div>
             )}
 
@@ -3301,6 +3452,107 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+
+            {!isDataLoading && activeTab === 'subscription' && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
+                      <Ticket className="text-pink-500" size={28} />
+                      Abonnement & Facturation
+                    </h2>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1">Gérez votre abonnement à la plateforme.</p>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#0a0a0a] rounded-3xl border border-slate-200 dark:border-white/5 overflow-hidden">
+                  <div className="p-8">
+                    {platformSubscription?.status === 'active' ? (
+                      <div className="bg-indigo-50/50 dark:bg-indigo-500/5 rounded-2xl p-6 border border-indigo-100 dark:border-indigo-500/20">
+                        <div className="flex items-center gap-4 mb-6">
+                           <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                             <CheckCircle2 size={24} />
+                           </div>
+                           <div>
+                             <h3 className="text-xl font-bold text-slate-900 dark:text-white">Plan Business Pro</h3>
+                             <p className="text-sm text-slate-500 dark:text-slate-400">Votre abonnement est actif.</p>
+                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                           <div className="bg-white dark:bg-white/5 rounded-xl p-4 border border-slate-200 dark:border-white/5">
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">PROCHAIN RENOUVELLEMENT</p>
+                              <p className="font-semibold text-slate-900 dark:text-white">
+                                {new Date(platformSubscription.currentPeriodEnd).toLocaleDateString()}
+                              </p>
+                           </div>
+                           <div className="bg-white dark:bg-white/5 rounded-xl p-4 border border-slate-200 dark:border-white/5">
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">STATUT DE FACTURATION</p>
+                              <p className="font-semibold text-emerald-600 dark:text-emerald-400">
+                                À jour
+                              </p>
+                           </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Gratuit */}
+                        <div className="bg-slate-50 dark:bg-white/5 rounded-3xl p-8 border border-slate-200 dark:border-white/10 flex flex-col flex-grow">
+                           <div className="mb-8">
+                             <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Plan Gratuit</h3>
+                             <p className="text-slate-500 dark:text-slate-400">Idéal pour tester la plateforme avec un seul point d'accès.</p>
+                             <div className="mt-6 flex items-baseline gap-1">
+                                <span className="text-4xl font-black text-slate-900 dark:text-white">0€</span>
+                                <span className="text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap"> /mois</span>
+                             </div>
+                           </div>
+                           <ul className="space-y-4 mb-8 flex-1">
+                              <li className="flex items-center gap-3 text-slate-700 dark:text-slate-300"><CheckCircle2 size={18} className="text-indigo-500" /> 1 Routeur maximum</li>
+                              <li className="flex items-center gap-3 text-slate-700 dark:text-slate-300"><CheckCircle2 size={18} className="text-indigo-500" /> Accès limité à 50 utilisateurs</li>
+                              <li className="flex items-center gap-3 text-slate-700 dark:text-slate-300"><CheckCircle2 size={18} className="text-indigo-500" /> Monétisation bloquée</li>
+                           </ul>
+                           <button className="w-full py-4 rounded-xl font-semibold bg-white dark:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white shadow-sm" disabled>
+                             Plan Actuel
+                           </button>
+                        </div>
+
+                        {/* Pro */}
+                        <div className="bg-gradient-to-b from-indigo-500 to-purple-600 rounded-3xl p-8 border border-indigo-500/30 text-white flex flex-col relative overflow-hidden flex-grow shadow-2xl shadow-indigo-500/20">
+                           <div className="absolute top-0 right-0 p-4 opacity-10">
+                              <Sparkles size={120} />
+                           </div>
+                           <div className="relative z-10 mb-8">
+                             <div className="inline-flex px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wide mb-4 backdrop-blur-sm">
+                               POPULAIRE
+                             </div>
+                             <h3 className="text-2xl font-bold mb-2">Plan Business</h3>
+                             <p className="text-indigo-100">Débloquez toutes les fonctionnalités et monétisez votre Wi-Fi.</p>
+                             <div className="mt-6 flex items-baseline gap-1">
+                                <span className="text-4xl font-black">49€</span>
+                                <span className="text-indigo-200 font-medium whitespace-nowrap"> /mois HT</span>
+                             </div>
+                           </div>
+                           <ul className="space-y-4 mb-8 relative z-10 flex-1">
+                              <li className="flex items-center gap-3 text-white"><CheckCircle2 size={18} className="text-indigo-200" /> Routeurs illimités</li>
+                              <li className="flex items-center gap-3 text-white"><CheckCircle2 size={18} className="text-indigo-200" /> Utilisateurs illimités</li>
+                              <li className="flex items-center gap-3 text-white"><CheckCircle2 size={18} className="text-indigo-200" /> Monétisation & Vouchers</li>
+                              <li className="flex items-center gap-3 text-white"><CheckCircle2 size={18} className="text-indigo-200" /> Support Prioritaire Mails</li>
+                           </ul>
+                           <button 
+                             onClick={() => handleSubscribeToPlatform(import.meta.env.VITE_STRIPE_PRICE_ID || 'price_1234')}
+                             disabled={isSubscribingToPlatform}
+                             className="w-full py-4 rounded-xl font-bold bg-white text-indigo-600 hover:bg-slate-50 transition-colors shadow-xl shadow-black/10 flex justify-center items-center gap-2 relative z-10"
+                           >
+                             {isSubscribingToPlatform ? <div className="w-5 h-5 border-2 border-indigo-600/30 border-t-indigo-600 rounded-full animate-spin"></div> : 'Passer au Plan Business'}
+                           </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {!isDataLoading && activeTab === 'profile' && (
               <div className="space-y-8">
                 <div>
@@ -5806,6 +6058,77 @@ export default function Dashboard() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Police de caractères</label>
+                  <select 
+                    value={portalConfigPreview.fontFamily || 'Inter'}
+                    onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, fontFamily: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 appearance-none transition-colors"
+                  >
+                    <option value="Inter">Inter (Sans-Serif Standard)</option>
+                    <option value="Space Grotesk">Space Grotesk (Technique / Moderne)</option>
+                    <option value="Playfair Display">Playfair Display (Éditorial / Serif)</option>
+                    <option value="JetBrains Mono">JetBrains Mono (Mono / Code)</option>
+                    <option value="Outfit">Outfit (Géométrique)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Image de fond (URL)</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                      <input 
+                        type="url" 
+                        value={portalConfigPreview.backgroundImageUrl || ''}
+                        onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, backgroundImageUrl: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
+                        placeholder="https://example.com/background.jpg"
+                      />
+                    </div>
+                    <div className="relative shrink-0 flex">
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 1024 * 1024 * 2) {
+                              alert("L'image est trop volumineuse. Veuillez choisir une image de moins de 2 Mo.");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setPortalConfigPreview({ ...portalConfigPreview, backgroundImageUrl: reader.result as string });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <button type="button" className="bg-slate-100 dark:bg-white/10 hover:bg-slate-200 dark:hover:bg-white/20 text-slate-700 dark:text-slate-300 px-6 py-3 rounded-xl transition-colors font-medium flex items-center gap-2 h-[48px] w-full sm:w-auto justify-center">
+                        <Upload size={18} />
+                        Uploader
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Vidéo de fond (URL MP4)</label>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <div className="flex-1">
+                      <input 
+                        type="url" 
+                        value={portalConfigPreview.backgroundVideoUrl || ''}
+                        onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, backgroundVideoUrl: e.target.value })}
+                        className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
+                        placeholder="https://example.com/video.mp4"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">La vidéo remplacera l'image de fond si elle est renseignée.</p>
+                </div>
+
+                <div>
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Message de bienvenue</label>
                   <textarea 
                     name="welcomeMessage"
@@ -5893,6 +6216,18 @@ export default function Dashboard() {
                       className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
                     />
                   </div>
+
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      if (previewIframeRef.current) {
+                         previewIframeRef.current.contentWindow?.postMessage({ type: 'TEST_AD_FLOW' }, '*');
+                      }
+                    }}
+                    className="w-full mt-4 py-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-semibold rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors flex justify-center items-center gap-2 border border-indigo-100 dark:border-indigo-500/20 shadow-sm"
+                  >
+                    <PlayCircle size={18} /> Tester l'affichage de la Publicité
+                  </button>
                 </div>
 
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5 space-y-4">
@@ -6014,6 +6349,132 @@ export default function Dashboard() {
                    ></iframe>
                 </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Router Config Modal */}
+      {showRouterConfigModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl my-4">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 sticky top-0 z-10">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Router size={20} className="text-blue-500" /> Configuration Matérielle
+              </h3>
+              <button 
+                onClick={() => setShowRouterConfigModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveRouterConfig} className="p-6 space-y-6">
+              <div>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+                  Associez ce portail à votre équipement réseau pour <strong>{currentLocationForRouter?.name}</strong>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Marque du Routeur / Contrôleur</label>
+                <select 
+                  value={routerConfigForm.routerType}
+                  onChange={(e) => setRouterConfigForm({ ...routerConfigForm, routerType: e.target.value })}
+                  className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+                >
+                  <option value="mikrotik">MikroTik (RouterOS)</option>
+                  <option value="unifi">Ubiquiti UniFi</option>
+                  <option value="pfsense">pfSense / OPNsense</option>
+                  <option value="cisco">Cisco Meraki</option>
+                </select>
+              </div>
+
+              {routerConfigForm.routerType === 'unifi' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL du Contrôleur UniFi</label>
+                    <input 
+                      type="url" 
+                      value={routerConfigForm.controllerUrl}
+                      onChange={(e) => setRouterConfigForm({ ...routerConfigForm, controllerUrl: e.target.value })}
+                      placeholder="https://unifi.mon-domaine.com:8443"
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">ID du Site UniFi (Optionnel)</label>
+                    <input 
+                      type="text" 
+                      value={routerConfigForm.siteId}
+                      onChange={(e) => setRouterConfigForm({ ...routerConfigForm, siteId: e.target.value })}
+                      placeholder="default"
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                </>
+              )}
+
+              {(routerConfigForm.routerType === 'mikrotik' || routerConfigForm.routerType === 'pfsense') && (
+                <>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">NAS ID (Identifiant du routeur)</label>
+                    <input 
+                      type="text" 
+                      value={routerConfigForm.nasId}
+                      onChange={(e) => setRouterConfigForm({ ...routerConfigForm, nasId: e.target.value })}
+                      placeholder="ex: routeur-cafe-1"
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Secret Partagé (RADIUS)</label>
+                    <input 
+                      type="password" 
+                      value={routerConfigForm.sharedSecret}
+                      onChange={(e) => setRouterConfigForm({ ...routerConfigForm, sharedSecret: e.target.value })}
+                      placeholder="••••••••••••"
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 p-4 rounded-xl text-sm text-blue-800 dark:text-blue-300">
+                <div className="font-semibold flex items-center gap-2 mb-2">
+                  <Server size={16} /> Instructions de configuration
+                </div>
+                {routerConfigForm.routerType === 'mikrotik' && (
+                  <p>Pour MikroTik, configurez le Walled Garden pour autoriser ce domaine et configurez l'URL de redirection login vers : <br/><code className="bg-white/50 px-1 py-0.5 rounded mt-1 block select-all">{window.location.origin}/portal/{currentLocationForRouter?.id}</code></p>
+                )}
+                {routerConfigForm.routerType === 'unifi' && (
+                  <p>Dans UniFi Controller, allez dans Guest Control {'>'} External Portal Server et entrez cette URL : <br/><code className="bg-white/50 px-1 py-0.5 rounded mt-1 block select-all">{window.location.origin}/portal/{currentLocationForRouter?.id}</code></p>
+                )}
+                {routerConfigForm.routerType === 'pfsense' && (
+                  <p>Pour pfSense Captive Portal, configurez l'URL de la page d'authentification externe : <br/><code className="bg-white/50 px-1 py-0.5 rounded mt-1 block select-all">{window.location.origin}/portal/{currentLocationForRouter?.id}</code></p>
+                )}
+                {routerConfigForm.routerType === 'cisco' && (
+                  <p>Pour Meraki Splash Page, configurez l'URL personnalisée pointant vers : <br/><code className="bg-white/50 px-1 py-0.5 rounded mt-1 block select-all">{window.location.origin}/portal/{currentLocationForRouter?.id}</code></p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-white/5">
+                <button 
+                  type="button"
+                  onClick={() => setShowRouterConfigModal(false)}
+                  className="flex-1 px-4 py-3 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button 
+                  type="submit"
+                  disabled={isSavingRouter}
+                  className="flex-1 flex justify-center items-center gap-2 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium disabled:opacity-50 transition-colors shadow-lg shadow-blue-500/20"
+                >
+                  {isSavingRouter ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : 'Enregistrer'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

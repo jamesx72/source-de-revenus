@@ -65,6 +65,29 @@ async function startServer() {
             payment_status = session.payment_status;
             customer_email = session.customer_details?.email || null;
             metadata = session.metadata || {};
+            
+            // Handle Platform Subscriptions
+            if (session.mode === 'subscription') {
+               console.log(`Platform Subscription checkout completed for session: ${session.id}`);
+               if (db) {
+                 try {
+                   const subscriptionsRef = db.collection('subscriptions');
+                   const snapshot = await subscriptionsRef.where('stripeSessionId', '==', session.id).get();
+                   if (!snapshot.empty) {
+                      await snapshot.docs[0].ref.update({
+                         status: 'active',
+                         stripeSubscriptionId: session.subscription,
+                         stripeCustomerId: session.customer,
+                         updatedAt: new Date().toISOString()
+                      });
+                   }
+                 } catch (err) {
+                   console.error("Failed to activate platform subscription:", err);
+                 }
+               }
+               res.json({ received: true });
+               return; // Skip normal transaction logic
+            }
         } else {
             session = event.data.object as any;
             amount_total = session.amount;
@@ -255,6 +278,55 @@ async function startServer() {
             }
           } catch(dbErr) {
             console.error(`Failed to record transaction ${session.id}:`, dbErr);
+          }
+        }
+      } else if (event.type === 'invoice.payment_succeeded') {
+        const invoice = event.data.object as any;
+        if (invoice.subscription && db) {
+          try {
+            const subscriptionsRef = db.collection('subscriptions');
+            const snapshot = await subscriptionsRef.where('stripeSubscriptionId', '==', invoice.subscription).get();
+            if (!snapshot.empty) {
+              await snapshot.docs[0].ref.update({
+                status: 'active',
+                currentPeriodEnd: new Date(invoice.lines.data[0].period.end * 1000).toISOString(),
+              });
+              console.log(`Subscription ${invoice.subscription} marked as active.`);
+            }
+          } catch (err) {
+            console.error('Error updating subscription on invoice success:', err);
+          }
+        }
+      } else if (event.type === 'invoice.payment_failed') {
+        const invoice = event.data.object as any;
+        if (invoice.subscription && db) {
+          try {
+            const subscriptionsRef = db.collection('subscriptions');
+            const snapshot = await subscriptionsRef.where('stripeSubscriptionId', '==', invoice.subscription).get();
+            if (!snapshot.empty) {
+              await snapshot.docs[0].ref.update({
+                status: 'past_due',
+              });
+              console.log(`Subscription ${invoice.subscription} marked as past_due.`);
+            }
+          } catch (err) {
+            console.error('Error updating subscription on invoice failure:', err);
+          }
+        }
+      } else if (event.type === 'customer.subscription.deleted') {
+        const subscription = event.data.object as any;
+        if (db) {
+          try {
+            const subscriptionsRef = db.collection('subscriptions');
+            const snapshot = await subscriptionsRef.where('stripeSubscriptionId', '==', subscription.id).get();
+            if (!snapshot.empty) {
+              await snapshot.docs[0].ref.update({
+                status: 'canceled',
+              });
+              console.log(`Subscription ${subscription.id} marked as canceled.`);
+            }
+          } catch (err) {
+            console.error('Error updating subscription on cancellation:', err);
           }
         }
       }
@@ -699,6 +771,54 @@ async function startServer() {
       const session = await stripe.checkout.sessions.create(sessionOpts, sessionRequestOpts);
 
       res.json({ clientSecret: session.client_secret });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Unknown Stripe error" });
+    }
+  });
+
+  app.post("/api/create-platform-subscription", async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY environment variable. Please configure it." });
+      }
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      const { userId, userEmail, priceId } = req.body;
+      const appUrl = process.env.APP_URL || "http://localhost:3000";
+
+      if (!userId || !priceId) {
+        return res.status(400).json({ error: "missing userId or priceId" });
+      }
+
+      const sessionOpts: any = {
+        mode: 'subscription',
+        line_items: [{ price: priceId, quantity: 1 }],
+        customer_email: userEmail || undefined,
+        metadata: {
+          userId: userId,
+          type: 'platform_subscription',
+        },
+        success_url: `${appUrl}/dashboard?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/dashboard?subscription=canceled`,
+      };
+
+      const session = await stripe.checkout.sessions.create(sessionOpts);
+
+      if (db) {
+          // Pre-create the subscription doc in firestore as pending
+          await db.collection('subscriptions').add({
+              userId: userId,
+              stripeSessionId: session.id,
+              status: 'pending',
+              createdAt: new Date().toISOString()
+          });
+      }
+
+      res.json({ url: session.url });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: e.message || "Unknown Stripe error" });

@@ -149,6 +149,8 @@ export default function CaptivePortal() {
         if (event.data.paymentConfig) {
           setPaymentConfig(event.data.paymentConfig);
         }
+      } else if (event.data?.type === 'TEST_AD_FLOW') {
+        window.dispatchEvent(new CustomEvent('t_test_ad_flow'));
       }
     };
     window.addEventListener('message', handleMessage);
@@ -363,9 +365,43 @@ export default function CaptivePortal() {
     }
   };
 
+  const handleAuthSuccess = () => {
+    setStep('success');
+    if (isDemo) return;
+
+    const linkLoginOnly = searchParams.get('link-login-only'); // MikroTik
+    const linkLogin = searchParams.get('link-login'); // MikroTik
+    const unifiId = searchParams.get('id'); // UniFi
+    const unifiAp = searchParams.get('ap'); // UniFi
+    
+    // MikroTik RouterOS Configuration Logic
+    if (linkLoginOnly || linkLogin) {
+        const url = linkLoginOnly || linkLogin;
+        if (url) {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = url;
+            const inputUsername = document.createElement('input');
+            inputUsername.name = 'username';
+            inputUsername.value = 'T-Hotspot-Guest';
+            form.appendChild(inputUsername);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    } 
+    // Ubiquiti UniFi Configuration Logic
+    else if (unifiId && locationId) {
+       fetch('/api/router/unifi/auth', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ mac: unifiId, ap: unifiAp, locationId })
+       }).catch(console.error);
+    }
+  };
+
   const handleSocialLogin = async (providerName: 'google' | 'facebook') => {
     if (isDemo) {
-      setStep('success');
+      handleAuthSuccess();
       return;
     }
     
@@ -379,7 +415,7 @@ export default function CaptivePortal() {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
-      setStep('success');
+      handleAuthSuccess();
 
       if (locationId) {
         try {
@@ -434,7 +470,7 @@ export default function CaptivePortal() {
       if (progress >= 100) {
         clearInterval(interval);
         setTimeout(async () => {
-          setStep('success');
+          handleAuthSuccess();
           if (locationId && !isDemo) {
             try {
               const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
@@ -470,11 +506,22 @@ export default function CaptivePortal() {
     }, progressInterval);
   };
 
+  useEffect(() => {
+    const handleTestAd = () => {
+       simulateAd();
+    };
+    window.addEventListener('t_test_ad_flow', handleTestAd as EventListener);
+    return () => window.removeEventListener('t_test_ad_flow', handleTestAd as EventListener);
+  }, [adDurationMs]);
+
   const activeThemeColor = portalConfig?.themeColor || '#6366f1';
   const layoutTheme = portalConfig?.layoutTheme || 'default';
   const logoUrl = portalConfig?.logoUrl;
   const welcomeMessage = portalConfig?.welcomeMessage || t('portal.welcome', { location: locationName });
   const termsOfService = portalConfig?.termsOfService;
+  const fontFamily = portalConfig?.fontFamily || 'Inter';
+  const backgroundImageUrl = portalConfig?.backgroundImageUrl || null;
+  const backgroundVideoUrl = portalConfig?.backgroundVideoUrl || null;
   
   let sessionDuration = portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60;
   if (wifiConfig) {
@@ -561,19 +608,44 @@ export default function CaptivePortal() {
   }
 
   const portalContent = (
-    <div className="bg-white/40 dark:bg-[#0b0c21]/40 backdrop-blur-2xl w-full h-full rounded-[2rem] overflow-hidden relative flex flex-col border border-slate-200 dark:border-white/10 shadow-inner">
-      <AnimatePresence mode="wait">
-        {step === 'home' && (
-          <motion.div 
-            key="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className={`flex-1 overflow-y-auto flex relative p-6 pt-16 h-full ${layoutTheme === 'modern' ? 'flex-col justify-end pb-8' : 'flex-col items-center'} ${layoutTheme === 'elegant' ? 'bg-slate-900 text-slate-100 font-serif' : 'bg-[#f8fafc] text-slate-900'}`}
-          >
-            {layoutTheme === 'modern' && logoUrl && (
-              <div className="absolute inset-0 opacity-20 bg-cover bg-center" style={{ backgroundImage: `url(${logoUrl})`, filter: 'blur(10px)' }}></div>
-            )}
+    <div 
+       className="w-full h-full rounded-[2rem] overflow-hidden relative flex flex-col shadow-inner"
+       style={{ fontFamily }}
+    >
+      {backgroundVideoUrl ? (
+        <video 
+           src={backgroundVideoUrl} 
+           autoPlay muted loop playsInline 
+           className="absolute inset-0 w-full h-full object-cover z-0" 
+        />
+      ) : backgroundImageUrl ? (
+         <img 
+           src={backgroundImageUrl} 
+           alt="Background" 
+           className="absolute inset-0 w-full h-full object-cover z-0" 
+         />
+      ) : (
+         <div className="absolute inset-0 z-0 bg-white/40 dark:bg-[#0b0c21]/40 backdrop-blur-2xl"></div>
+      )}
+      
+      {/* Overlay so text remains readable */}
+      {(backgroundVideoUrl || backgroundImageUrl) && (
+         <div className="absolute inset-0 z-0 bg-black/40 backdrop-blur-[2px]"></div>
+      )}
+
+      <div className="relative z-10 w-full h-full flex flex-col">
+        <AnimatePresence mode="wait">
+          {step === 'home' && (
+            <motion.div 
+              key="home"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className={`flex-1 overflow-y-auto flex relative p-6 pt-16 h-full ${layoutTheme === 'modern' ? 'flex-col justify-end pb-8' : 'flex-col items-center'} ${(backgroundVideoUrl || backgroundImageUrl) ? 'text-white' : layoutTheme === 'elegant' ? 'bg-slate-900 text-slate-100 font-serif' : 'bg-[#f8fafc] text-slate-900'}`}
+            >
+              {layoutTheme === 'modern' && logoUrl && !(backgroundVideoUrl || backgroundImageUrl) && (
+                <div className="absolute inset-0 opacity-20 bg-cover bg-center z-[-1]" style={{ backgroundImage: `url(${logoUrl})`, filter: 'blur(10px)' }}></div>
+              )}
             
             <div className={`w-full relative z-10 flex flex-col ${layoutTheme === 'modern' ? 'bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-xl' : layoutTheme === 'minimal' ? 'items-center flex-1 justify-center' : 'items-center'}`}>
               {layoutTheme !== 'modern' && (
@@ -817,7 +889,7 @@ export default function CaptivePortal() {
                 </div>
                 
                 <button 
-                  onClick={() => setStep('success')}
+                  onClick={handleAuthSuccess}
                   style={{ backgroundColor: activeThemeColor }}
                   className="w-full py-4 text-white rounded-xl font-bold text-lg transition-transform shadow-lg shadow-indigo-500/20 mt-auto hover:opacity-90 active:scale-95"
                 >
@@ -979,6 +1051,7 @@ export default function CaptivePortal() {
 
           </AnimatePresence>
         </div>
+      </div>
     );
 
   if (isPreview) {
