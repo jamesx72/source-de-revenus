@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Wifi, BarChart3, Megaphone, Smartphone, Check, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Wifi, BarChart3, Megaphone, Smartphone, Check, ArrowRight, ShieldCheck, Star } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { AuthModal } from '../components/AuthModal';
+import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export default function Landing() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const { t } = useLanguage();
 
   const handleDashboardClick = () => {
     if (user) {
@@ -46,8 +49,9 @@ export default function Landing() {
               <a href="#pricing" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Tarifs</a>
               <a href="#demo" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Portail Captif</a>
               <div className="h-4 w-px bg-white/10"></div>
+              <LanguageSwitcher />
               <ThemeToggle />
-              <Link to="/portal" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Démo Client</Link>
+              <Link to="/portal?demo=true" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium">Démo Client</Link>
               <button onClick={handleDashboardClick} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 text-sm font-semibold rounded-full transition-colors">
                 {user ? 'Mon Espace' : 'Connexion gérant'}
               </button>
@@ -78,7 +82,7 @@ export default function Landing() {
               transition={{ duration: 0.5, delay: 0.1 }}
               className="text-5xl md:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-6 leading-tight"
             >
-              Transformez votre Wi-Fi en <span className="text-indigo-400">source de revenus</span>
+              {t('landing.hero_title')}
             </motion.h1>
             <motion.p 
               initial={{ opacity: 0, y: 20 }}
@@ -86,7 +90,7 @@ export default function Landing() {
               transition={{ duration: 0.5, delay: 0.2 }}
               className="text-lg text-slate-600 dark:text-slate-300 mb-10 tracking-wide"
             >
-              Pour les cafés, restaurants et hôtels. Monétisez votre connexion Internet via la vente de forfaits, la publicité sponsorisée et collectez des données marketing précieuses.
+              {t('landing.hero_subtitle')}
             </motion.p>
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
@@ -97,7 +101,7 @@ export default function Landing() {
               <button onClick={handleDashboardClick} className="inline-flex items-center justify-center gap-2 bg-indigo-500 text-white px-8 py-3.5 rounded-full font-medium text-lg hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/30 cursor-pointer">
                 Lancer mon Wi-Fi <ArrowRight size={20} />
               </button>
-              <Link to="/portal" className="inline-flex items-center justify-center gap-2 bg-white dark:bg-white/5 text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 px-8 py-3.5 rounded-full font-medium text-lg hover:bg-white/10 transition-all backdrop-blur-md">
+              <Link to="/portal?demo=true" className="inline-flex items-center justify-center gap-2 bg-white dark:bg-white/5 text-slate-900 dark:text-white border border-slate-200 dark:border-white/10 px-8 py-3.5 rounded-full font-medium text-lg hover:bg-white/10 transition-all backdrop-blur-md">
                 Voir la démo client <Smartphone size={20} />
               </Link>
             </motion.div>
@@ -136,6 +140,63 @@ export default function Landing() {
               </div>
               <h3 className="text-xl font-bold mb-3 text-slate-900 dark:text-white">Analyses Visiteurs</h3>
               <p className="text-slate-500 dark:text-slate-400 leading-relaxed">Collectez des statistiques détaillées, fidélisez vos clients et lancez des campagnes SMS/Email ciblées.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Testimonials */}
+      <section id="testimonials" className="py-24 relative z-10 bg-slate-50 dark:bg-white/5 border-y border-slate-200 dark:border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Ils font confiance à WiFiCash</h2>
+            <p className="mt-4 text-lg text-slate-500 dark:text-slate-400">Découvrez comment nos partenaires ont transformé leur accès Wi-Fi en atout.</p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            {/* Testimonial 1 */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-8 rounded-3xl shadow-sm relative transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="text-indigo-500 mb-6 flex">
+                 {[...Array(5)].map((_, i) => <Star key={i} size={20} className="fill-indigo-500" />)}
+              </div>
+              <p className="text-slate-700 dark:text-slate-300 mb-6 italic leading-relaxed">"Depuis que nous utilisons WiFiCash, nos clients se connectent beaucoup plus facilement, et la vente de passes Wi-Fi a généré une nouvelle source de revenus non négligeable pour notre établissement."</p>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-indigo-100 dark:bg-indigo-500/20 rounded-full flex items-center justify-center text-xl font-bold text-indigo-600 dark:text-indigo-400">MJ</div>
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-white">Marc J.</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Gérant d'hôtel</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Testimonial 2 */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-8 rounded-3xl shadow-sm relative transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="text-indigo-500 mb-6 flex">
+                 {[...Array(5)].map((_, i) => <Star key={i} size={20} className="fill-indigo-500" />)}
+              </div>
+              <p className="text-slate-700 dark:text-slate-300 mb-6 italic leading-relaxed">"L'intégration avec notre infrastructure Ubiquiti a été transparente. Les options pour personnaliser la page de connexion ont vraiment amélioré notre image de marque."</p>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-purple-100 dark:bg-purple-500/20 rounded-full flex items-center justify-center text-xl font-bold text-purple-600 dark:text-purple-400">SL</div>
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-white">Sophie L.</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Directrice de clinique</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Testimonial 3 */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 p-8 rounded-3xl shadow-sm relative transition-all hover:shadow-md hover:-translate-y-1">
+              <div className="text-indigo-500 mb-6 flex">
+                 {[...Array(5)].map((_, i) => <Star key={i} size={20} className="fill-indigo-500" />)}
+              </div>
+              <p className="text-slate-700 dark:text-slate-300 mb-6 italic leading-relaxed">"Générer des vouchers en quelques clics nous a fait gagner un temps précieux à l'accueil de notre espace de coworking. Le tableau de bord est extrêmement intuitif !"</p>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-green-100 dark:bg-green-500/20 rounded-full flex items-center justify-center text-xl font-bold text-green-600 dark:text-green-400">TB</div>
+                <div>
+                  <h4 className="font-bold text-slate-900 dark:text-white">Thomas B.</h4>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Fondateur d'espace Coworking</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

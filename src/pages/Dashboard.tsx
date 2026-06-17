@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon } from 'lucide-react';
+import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon, Router, RefreshCw, PlayCircle } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -13,6 +13,7 @@ import { ThemeToggle } from '../components/ThemeToggle';
 import { DashboardSkeleton } from '../components/DashboardSkeleton';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
+import { motion, AnimatePresence } from 'motion/react';
 
 const DAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 const HOURS = Array.from({length: 24}, (_, i) => i);
@@ -64,6 +65,176 @@ export default function Dashboard() {
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [isSavingWifiConfig, setIsSavingWifiConfig] = useState(false);
 
+  // DnD configuration
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const [widgetOrder, setWidgetOrder] = useState(['revenue', 'plansAndHealth', 'visitors', 'activity', 'activeDevices']);
+
+  function handleWidgetDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setWidgetOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string);
+        const newIndex = items.indexOf(over.id as string);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  }
+
+  function handleLocationDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setLocations((items) => {
+        const oldIndex = items.findIndex(i => i.id === active.id);
+        const newIndex = items.findIndex(i => i.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  }
+
+  // Locations state
+  const [locations, setLocations] = useState<any[]>([]);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [vouchers, setVouchers] = useState<any[]>([]);
+  const [showVoucherModal, setShowVoucherModal] = useState(false);
+  const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
+  const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
+  const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any>(null);
+  const [selectedRouterGuide, setSelectedRouterGuide] = useState<any>(null);
+  const [isGuidePreviewMode, setIsGuidePreviewMode] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  
+  const [routerConfig, setRouterConfig] = useState({
+    portalUrl: 'https://portal.example.com/login',
+    radiusAuthIp: '198.51.100.15',
+    radiusAcctIp: '198.51.100.16',
+    radiusSecret: 's3cr3t_R4dius_K3y!',
+    radiusAuthPort: '1812',
+    radiusAcctPort: '1813',
+    routerIp: ''
+  });
+  const [isSavingRouter, setIsSavingRouter] = useState(false);
+  const [showRadiusSecret, setShowRadiusSecret] = useState(false);
+
+  const [discounts, setDiscounts] = useState<any[]>([]);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [isGeneratingDiscount, setIsGeneratingDiscount] = useState(false);
+  const [discountConfig, setDiscountConfig] = useState({ code: '', type: 'percentage', value: 10, maxUses: 100, locationId: '' });
+  const [isLoadingLocations, setIsLoadingLocations] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [wizardData, setWizardData] = useState({
+    name: '', type: 'cafe', address: '',
+    currency: 'eur', freeDuration: '60', 
+    price1h: 2, price24h: 5
+  });
+  const [isSubmittingWizard, setIsSubmittingWizard] = useState(false);
+
+  const [currentLocation, setCurrentLocation] = useState<any>(null);
+  const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
+  const [locationFormError, setLocationFormError] = useState('');
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
+
+  // Portal Config Modal
+  const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
+  const [currentLocationForPortal, setCurrentLocationForPortal] = useState<any>(null);
+  const [isSubmittingPortalConfig, setIsSubmittingPortalConfig] = useState(false);
+  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '', adMediaType: 'image', adMediaUrl: '', adDuration: 5 });
+  const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  
+  useEffect(() => {
+    if (previewIframeRef.current && showPortalConfigModal) {
+      previewIframeRef.current.contentWindow?.postMessage({
+        type: 'UPDATE_PORTAL_CONFIG',
+        config: portalConfigPreview,
+        name: currentLocationForPortal?.name,
+        paymentConfig: currentLocationForPortal?.paymentConfig
+      }, '*');
+    }
+  }, [portalConfigPreview, currentLocationForPortal, showPortalConfigModal]);
+
+  const [aiBrandPrompt, setAiBrandPrompt] = useState('');
+
+  // Pricing Config Modal
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [currentLocationForPricing, setCurrentLocationForPricing] = useState<any>(null);
+  
+  interface PassConfig { id: string; name: string; price: number; duration: number; stripePriceId: string; }
+  const [pricingConfigPreview, setPricingConfigPreview] = useState<{ currency: string; passes: PassConfig[] }>({ currency: 'eur', passes: [] });
+  const [isSubmittingPricing, setIsSubmittingPricing] = useState(false);
+  const [stripeProducts, setStripeProducts] = useState<any[]>([]);
+  const [isFetchingStripeProducts, setIsFetchingStripeProducts] = useState(false);
+
+  const fetchStripeProducts = async (locationId: string) => {
+    setIsFetchingStripeProducts(true);
+    try {
+      const res = await fetch(`/api/stripe-products?locationId=${locationId}`);
+      const data = await res.json();
+      if (data.products) {
+        setStripeProducts(data.products);
+        toast.success(`${data.products.length} produits Stripe récupérés.`);
+      }
+    } catch(err) {
+      console.error(err);
+      toast.error("Erreur lors de la récupération des produits Stripe.");
+    } finally {
+      setIsFetchingStripeProducts(false);
+    }
+  };
+
+  const handleSavePricingConfig = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user || !currentLocationForPricing) return;
+    setIsSubmittingPricing(true);
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const docRef = doc(db, 'locations', currentLocationForPricing.id);
+      await setDoc(docRef, {
+        paymentConfig: {
+          currency: pricingConfigPreview.currency,
+          passes: pricingConfigPreview.passes
+        }
+      }, { merge: true });
+      
+      toast.success("Tarifs mis à jour avec succès.");
+      setLocations(prev => prev.map(loc => 
+        loc.id === currentLocationForPricing.id 
+          ? { ...loc, paymentConfig: { ...pricingConfigPreview } } 
+          : loc
+      ));
+      setShowPricingModal(false);
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Erreur lors de la mise à jour des tarifs.");
+    } finally {
+      setIsSubmittingPricing(false);
+    }
+  };
+  const [isGeneratingAiTheme, setIsGeneratingAiTheme] = useState(false);
+
+  // Notification Config Modal
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [currentLocationForNotification, setCurrentLocationForNotification] = useState<any>(null);
+  const [isSubmittingNotification, setIsSubmittingNotification] = useState(false);
+
+  // QR Code Modal
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [currentLocationForQr, setCurrentLocationForQr] = useState<any>(null);
+
   useEffect(() => {
     if (locations.length === 0) return;
     const loc = globalLocationId === 'all' ? locations[0] : locations.find(l => l.id === globalLocationId);
@@ -113,129 +284,6 @@ export default function Dashboard() {
       setIsSavingWifiConfig(false);
     }
   };
-
-  // DnD configuration
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  const [widgetOrder, setWidgetOrder] = useState(['revenue', 'plansAndHealth', 'visitors', 'activity', 'activeDevices']);
-
-  function handleWidgetDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setWidgetOrder((items) => {
-        const oldIndex = items.indexOf(active.id as string);
-        const newIndex = items.indexOf(over.id as string);
-        return arrayMove(items, oldIndex, newIndex);
-      });
-    }
-  }
-
-  function handleLocationDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setLocations((items) => {
-        const oldIndex = items.findIndex(i => i.id === active.id);
-        const newIndex = items.findIndex(i => i.id === over.id);
-        return arrayMove(items, oldIndex, newIndex);
-      });
-    }
-  }
-
-  // Locations state
-  const [locations, setLocations] = useState<any[]>([]);
-  const [connections, setConnections] = useState<any[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [vouchers, setVouchers] = useState<any[]>([]);
-  const [showVoucherModal, setShowVoucherModal] = useState(false);
-  const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
-  const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
-  const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any>(null);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
-
-  const [discounts, setDiscounts] = useState<any[]>([]);
-  const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [isGeneratingDiscount, setIsGeneratingDiscount] = useState(false);
-  const [discountConfig, setDiscountConfig] = useState({ code: '', type: 'percentage', value: 10, maxUses: 100, locationId: '' });
-  const [isLoadingLocations, setIsLoadingLocations] = useState(false);
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  const [showSetupWizard, setShowSetupWizard] = useState(false);
-  const [wizardStep, setWizardStep] = useState(1);
-  const [wizardData, setWizardData] = useState({
-    name: '', type: 'cafe', address: '',
-    currency: 'eur', freeDuration: '60', 
-    price1h: 2, price24h: 5
-  });
-  const [isSubmittingWizard, setIsSubmittingWizard] = useState(false);
-
-  const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [isSubmittingLocation, setIsSubmittingLocation] = useState(false);
-  const [locationFormError, setLocationFormError] = useState('');
-  const [showMobilePreview, setShowMobilePreview] = useState(false);
-
-  // Portal Config Modal
-  const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
-  const [currentLocationForPortal, setCurrentLocationForPortal] = useState<any>(null);
-  const [isSubmittingPortalConfig, setIsSubmittingPortalConfig] = useState(false);
-  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '' });
-  const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
-  const [aiBrandPrompt, setAiBrandPrompt] = useState('');
-
-  // Pricing Config Modal
-  const [showPricingModal, setShowPricingModal] = useState(false);
-  const [currentLocationForPricing, setCurrentLocationForPricing] = useState<any>(null);
-  const [pricingConfigPreview, setPricingConfigPreview] = useState({ currency: 'eur', price1h: 2, price24h: 5 });
-  const [isSubmittingPricing, setIsSubmittingPricing] = useState(false);
-
-  const handleSavePricingConfig = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!user || !currentLocationForPricing) return;
-    setIsSubmittingPricing(true);
-    try {
-      const { doc, setDoc } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-      
-      const docRef = doc(db, 'locations', currentLocationForPricing.id);
-      await setDoc(docRef, {
-        paymentConfig: {
-          currency: pricingConfigPreview.currency,
-          price1h: Number(pricingConfigPreview.price1h),
-          price24h: Number(pricingConfigPreview.price24h)
-        }
-      }, { merge: true });
-      
-      toast.success("Tarifs mis à jour avec succès.");
-      setLocations(prev => prev.map(loc => 
-        loc.id === currentLocationForPricing.id 
-          ? { ...loc, paymentConfig: { ...pricingConfigPreview, price1h: Number(pricingConfigPreview.price1h), price24h: Number(pricingConfigPreview.price24h) } } 
-          : loc
-      ));
-      setShowPricingModal(false);
-    } catch (error: any) {
-      console.error(error);
-      toast.error("Erreur lors de la mise à jour des tarifs.");
-    } finally {
-      setIsSubmittingPricing(false);
-    }
-  };
-  const [isGeneratingAiTheme, setIsGeneratingAiTheme] = useState(false);
-
-  // Notification Config Modal
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
-  const [currentLocationForNotification, setCurrentLocationForNotification] = useState<any>(null);
-  const [isSubmittingNotification, setIsSubmittingNotification] = useState(false);
-
-  // QR Code Modal
-  const [showQrModal, setShowQrModal] = useState(false);
-  const [currentLocationForQr, setCurrentLocationForQr] = useState<any>(null);
 
   useEffect(() => {
     // Simulate data fetching from Firestore
@@ -514,6 +562,15 @@ export default function Dashboard() {
     }
   };
 
+  const handleSaveRouterConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingRouter(true);
+    setTimeout(() => {
+      setIsSavingRouter(false);
+      toast.success("Configuration routeur mise à jour et redirection automatisée avec succès.");
+    }, 1000);
+  };
+
   const handleGenerateVouchers = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsGeneratingVouchers(true);
@@ -644,7 +701,10 @@ export default function Dashboard() {
         layoutTheme: portalConfigPreview.layoutTheme || 'default',
         sessionDuration: portalConfigPreview.sessionDuration || 60,
         allowExtension: portalConfigPreview.allowExtension || false,
-        redirectUrl: portalConfigPreview.redirectUrl || null
+        redirectUrl: portalConfigPreview.redirectUrl || null,
+        adMediaType: portalConfigPreview.adMediaType || 'image',
+        adMediaUrl: portalConfigPreview.adMediaUrl || null,
+        adDuration: portalConfigPreview.adDuration || 5
       };
 
       await setDoc(docRef, {
@@ -1120,6 +1180,7 @@ export default function Dashboard() {
               { id: 'locations', icon: MapPin, label: 'Établissements' },
               { id: 'branding', icon: Palette, label: 'Venue Branding' },
               { id: 'wifi', icon: Wifi, label: 'Forfaits Wi-Fi' },
+              { id: 'routers', icon: Router, label: 'Configuration Routeurs' },
               { id: 'vouchers', icon: Ticket, label: 'Vouchers & Accès' },
               { id: 'discounts', icon: Gift, label: 'Codes Promo' },
               { id: 'users', icon: Users, label: 'Visiteurs & CRM' },
@@ -1599,6 +1660,99 @@ export default function Dashboard() {
               </>
             )}
 
+            {!isDataLoading && activeTab === 'routers' && (
+              <div className="space-y-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Configuration des Routeurs</h2>
+                  <p className="text-slate-500 dark:text-slate-400">Instructions pour connecter vos équipements réseau (MikroTik, UniFi, Tp-Link Omada) au portail captif.</p>
+                </div>
+                <form onSubmit={handleSaveRouterConfig} className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl">
+                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">Informations RADIUS / Hotspot</h3>
+                     <button type="submit" disabled={isSavingRouter} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex justify-center items-center gap-2">
+                       {isSavingRouter ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <CheckCircle2 size={16} />}
+                       {isSavingRouter ? 'Enregistrement...' : 'Enregistrer et Lier'}
+                     </button>
+                   </div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">URL du Portail Externe</label>
+                          <div className="flex">
+                             <input value={routerConfig.portalUrl} onChange={e => setRouterConfig({...routerConfig, portalUrl: e.target.value})} className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">IP Publique / Point d'accès de votre Routeur</label>
+                          <div className="flex">
+                             <input value={routerConfig.routerIp} onChange={e => setRouterConfig({...routerConfig, routerIp: e.target.value})} placeholder="ex: 203.0.113.45" className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                          </div>
+                        </div>
+                     </div>
+                     <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">IP RADIUS Auth (Port {routerConfig.radiusAuthPort})</label>
+                            <input value={routerConfig.radiusAuthIp} onChange={e => setRouterConfig({...routerConfig, radiusAuthIp: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">IP RADIUS Acct (Port {routerConfig.radiusAcctPort})</label>
+                            <input value={routerConfig.radiusAcctIp} onChange={e => setRouterConfig({...routerConfig, radiusAcctIp: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Secret RADIUS Partagé</label>
+                          <div className="flex">
+                             <input value={routerConfig.radiusSecret} onChange={e => setRouterConfig({...routerConfig, radiusSecret: e.target.value})} type={showRadiusSecret ? "text" : "password"} className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-l-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                             <button type="button" onClick={() => setShowRadiusSecret(!showRadiusSecret)} className="bg-slate-200 dark:bg-slate-700 px-4 rounded-r-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition-colors">
+                               {showRadiusSecret ? <EyeOff size={16}/> : <Eye size={16}/>}
+                             </button>
+                          </div>
+                        </div>
+                     </div>
+                   </div>
+                </form>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   <div 
+                      onClick={() => setSelectedRouterGuide('ubiquiti')}
+                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                   >
+                      <div className="h-16 w-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                        <Server size={32} />
+                      </div>
+                      <h4 className="font-bold text-slate-900 dark:text-white text-lg">Ubiquiti UniFi</h4>
+                      <p className="text-sm text-slate-500 mt-2 mb-4">Hotspot Guest Network & External Portal Server.</p>
+                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                   </div>
+                   
+                   <div 
+                      onClick={() => setSelectedRouterGuide('mikrotik')}
+                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                   >
+                      <div className="h-16 w-16 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center mb-4 text-red-600 dark:text-red-400 group-hover:scale-110 transition-transform">
+                        <Server size={32} />
+                      </div>
+                      <h4 className="font-bold text-slate-900 dark:text-white text-lg">MikroTik RouterOS</h4>
+                      <p className="text-sm text-slate-500 mt-2 mb-4">Configuration Hotspot & Walled Garden via Winbox/Terminal.</p>
+                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                   </div>
+
+                   <div 
+                      onClick={() => setSelectedRouterGuide('openwrt')}
+                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                   >
+                      <div className="h-16 w-16 bg-teal-50 dark:bg-teal-500/10 rounded-2xl flex items-center justify-center mb-4 text-teal-600 dark:text-teal-400 group-hover:scale-110 transition-transform">
+                        <Server size={32} />
+                      </div>
+                      <h4 className="font-bold text-slate-900 dark:text-white text-lg">OpenWRT</h4>
+                      <p className="text-sm text-slate-500 mt-2 mb-4">Configuration CoovaChilli / External RADIUS Server.</p>
+                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                   </div>
+                </div>
+              </div>
+            )}
+
             {!isDataLoading && activeTab === 'vouchers' && (
               <div className="space-y-8">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1606,13 +1760,46 @@ export default function Dashboard() {
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Vouchers & Codes d'accès</h2>
                     <p className="text-slate-500 dark:text-slate-400">Générez des codes à usage unique ou limités dans le temps (idéal pour les hôtels ou l'accès payant).</p>
                   </div>
-                  <button
-                    onClick={() => setShowVoucherModal(true)}
-                    className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm"
-                  >
-                    <Plus size={18} />
-                    Générer des codes
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const jsPDF = (await import('jspdf')).default;
+                          const pdf = new jsPDF();
+                          pdf.setFontSize(22);
+                          pdf.text("Liste des Vouchers d'accès WiFi", 20, 20);
+                          
+                          pdf.setFontSize(12);
+                          let yOffset = 40;
+                          vouchers.filter(v => v.status === 'active').forEach((v, index) => {
+                             if (yOffset > 270) {
+                                pdf.addPage();
+                                yOffset = 20;
+                             }
+                             pdf.text(`Code: ${v.code}   |   Durée: ${v.duration}   |   Créé le: ${new Date(v.createdAt).toLocaleDateString('fr-FR')}`, 20, yOffset);
+                             yOffset += 10;
+                          });
+                          
+                          pdf.save("vouchers-export.pdf");
+                          toast.success("Vouchers exportés en PDF !");
+                        } catch(err) {
+                           console.error(err);
+                           toast.error("Erreur lors de l'exportation des vouchers.");
+                        }
+                      }}
+                      className="flex items-center gap-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-xl transition-colors font-medium text-sm"
+                    >
+                      <Download size={18} />
+                      Exporter en PDF
+                    </button>
+                    <button
+                      onClick={() => setShowVoucherModal(true)}
+                      className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm"
+                    >
+                      <Plus size={18} />
+                      Générer des codes
+                    </button>
+                  </div>
                 </div>
 
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm overflow-hidden flex flex-col">
@@ -2137,7 +2324,10 @@ export default function Dashboard() {
                                   layoutTheme: loc.portalConfig?.layoutTheme || 'default',
                                   sessionDuration: loc.portalConfig?.sessionDuration || 60,
                                   allowExtension: loc.portalConfig?.allowExtension || false,
-                                  redirectUrl: loc.portalConfig?.redirectUrl || ''
+                                  redirectUrl: loc.portalConfig?.redirectUrl || '',
+                                  adMediaType: loc.portalConfig?.adMediaType || 'image',
+                                  adMediaUrl: loc.portalConfig?.adMediaUrl || '',
+                                  adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5
                                 });
                                 setShowPortalConfigModal(true);
                               }}
@@ -2151,9 +2341,12 @@ export default function Dashboard() {
                                 setCurrentLocationForPricing(loc);
                                 setPricingConfigPreview({
                                   currency: loc.paymentConfig?.currency || 'eur',
-                                  price1h: loc.paymentConfig?.price1h || 2,
-                                  price24h: loc.paymentConfig?.price24h || 5
+                                  passes: loc.paymentConfig?.passes || [
+                                    { id: '1', name: 'Pass 1 Heure', price: loc.paymentConfig?.price1h || 2, duration: 60, stripePriceId: '' },
+                                    { id: '2', name: 'Pass 24 Heures', price: loc.paymentConfig?.price24h || 5, duration: 1440, stripePriceId: '' }
+                                  ]
                                 });
+                                setStripeProducts([]);
                                 setShowPricingModal(true);
                               }}
                               className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/20 rounded-lg transition-colors"
@@ -2252,7 +2445,10 @@ export default function Dashboard() {
                                 layoutTheme: loc.portalConfig?.layoutTheme || 'default',
                                 sessionDuration: loc.portalConfig?.sessionDuration || 60,
                                 allowExtension: loc.portalConfig?.allowExtension || false,
-                                redirectUrl: loc.portalConfig?.redirectUrl || ''
+                                redirectUrl: loc.portalConfig?.redirectUrl || '',
+                                adMediaType: loc.portalConfig?.adMediaType || 'image',
+                                adMediaUrl: loc.portalConfig?.adMediaUrl || '',
+                                adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5
                               });
                               setShowPortalConfigModal(true);
                             }}
@@ -2501,6 +2697,7 @@ export default function Dashboard() {
                           <th className="px-6 py-4 font-medium">Établissement</th>
                           <th className="px-6 py-4 font-medium">Début & Durée</th>
                           <th className="px-6 py-4 font-medium">Trafic (↑/↓)</th>
+                          <th className="px-6 py-4 font-medium">Type d'accès</th>
                           <th className="px-6 py-4 font-medium">Statut</th>
                           <th className="px-6 py-4"></th>
                         </tr>
@@ -2508,7 +2705,7 @@ export default function Dashboard() {
                       <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-600 dark:text-slate-300">
                         {filteredConnections.length === 0 ? (
                            <tr>
-                             <td colSpan={6} className="px-6 py-8 text-center text-slate-500">Aucune connexion enregistrée.</td>
+                             <td colSpan={7} className="px-6 py-8 text-center text-slate-500">Aucune connexion enregistrée.</td>
                            </tr>
                         ) : (
                           filteredConnections.map((log) => {
@@ -2536,6 +2733,17 @@ export default function Dashboard() {
                                    <div className="text-xs text-slate-500 mt-1">{duration}</div>
                                  </td>
                                  <td className="px-6 py-4 font-medium">-</td>
+                                 <td className="px-6 py-4">
+                                   {log.paymentStatus === 'paid' ? (
+                                      <span className="px-2 py-1 bg-indigo-50 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400 rounded-lg text-xs font-semibold">
+                                        Premium
+                                      </span>
+                                   ) : (
+                                      <span className="px-2 py-1 bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300 rounded-lg text-xs font-semibold">
+                                        Gratuit
+                                      </span>
+                                   )}
+                                 </td>
                                  <td className="px-6 py-4">
                                    <span className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold ${statusColor}`}>
                                      {log.status || "Inconnu"}
@@ -4580,6 +4788,157 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Routeur Guide Modal */}
+      {selectedRouterGuide && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all ${isGuidePreviewMode ? 'overflow-y-auto items-start pt-8 pb-8' : ''}`}>
+          <div className={`bg-white dark:bg-[#050614] print:bg-white rounded-3xl w-full overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl print:border-none print:shadow-none print-only-voucher transition-all ${isGuidePreviewMode ? 'max-w-[794px] my-auto' : 'max-w-2xl max-h-[90vh] flex flex-col'}`}>
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 print:hidden shrink-0">
+              <div className="flex items-center gap-4">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white hidden sm:block">
+                  Guide de Configuration : {selectedRouterGuide === 'ubiquiti' ? 'Ubiquiti UniFi' : selectedRouterGuide === 'mikrotik' ? 'MikroTik RouterOS' : 'OpenWRT'}
+                </h3>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white sm:hidden">
+                  Guide {selectedRouterGuide}
+                </h3>
+                <button 
+                  onClick={() => setIsGuidePreviewMode(!isGuidePreviewMode)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border ${isGuidePreviewMode ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 border-indigo-200 dark:border-indigo-500/30' : 'bg-white dark:bg-slate-800 text-slate-600 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/80'}`}
+                >
+                  <Eye size={16} /> <span className="hidden sm:inline">Aperçu PDF</span>
+                </button>
+              </div>
+              <button onClick={() => { setSelectedRouterGuide(null); setIsGuidePreviewMode(false); }} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm flex-shrink-0">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className={`bg-slate-100 dark:bg-black/20 print:bg-white flex-1 overflow-y-auto ${isGuidePreviewMode ? 'p-6 flex justify-center' : ''}`}>
+              <div id="router-guide-element" className={`flex flex-col text-left bg-white dark:bg-[#050614] print:bg-white transition-all origin-top mx-auto ${isGuidePreviewMode ? 'w-[794px] min-h-[1123px] shadow-2xl scale-[0.4] sm:scale-[0.6] md:scale-75 lg:scale-90 xl:scale-100 transform-gpu p-12' : 'w-full p-8'}`}>
+                 <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mb-6">
+                   <Server size={32} />
+                 </div>
+                 <h2 className="text-3xl font-bold text-slate-900 dark:text-white print:text-black mb-2">Guide d'intégration {selectedRouterGuide === 'ubiquiti' ? 'Ubiquiti UniFi' : selectedRouterGuide === 'mikrotik' ? 'MikroTik RouterOS' : 'OpenWRT'}</h2>
+                 <p className="text-slate-500 dark:text-slate-400 print:text-gray-500 text-base mb-8">Ces instructions vous guident pas à pas pour connecter votre équipement réseau au portail captif cloud.</p>
+
+                 {selectedRouterGuide === 'ubiquiti' && (
+                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Connectez-vous au UniFi Network Controller</h4>
+                      <p>Allez dans <strong>Settings &gt; Guest Control</strong>.</p>
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Activez le Portail Invité</h4>
+                      <ul className="list-disc pl-5 space-y-2">
+                        <li>Cochez <strong>Enable Guest Portal</strong></li>
+                        <li>Authentication: <strong>External Portal Server</strong></li>
+                        <li>Custom Portal: <strong>IP Address</strong> <code>{routerConfig.radiusAuthIp}</code></li>
+                        <li>Activez <strong>Use Secure Portal</strong></li>
+                      </ul>
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">3. Configuration RADIUS</h4>
+                      <ul className="list-disc pl-5 space-y-2">
+                        <li>Créez un nouveau profil RADIUS en cliquant sur <strong>Create New RADIUS Profile</strong></li>
+                        <li>Auth Server: <code>{routerConfig.radiusAuthIp}</code> / Port: <code>{routerConfig.radiusAuthPort}</code></li>
+                        <li>Acct Server: <code>{routerConfig.radiusAcctIp}</code> / Port: <code>{routerConfig.radiusAcctPort}</code></li>
+                        <li>Shared Secret: <code>{routerConfig.radiusSecret}</code></li>
+                      </ul>
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">4. Access Control (Walled Garden)</h4>
+                      <p>Dans la section Pre-Authorization Access, ajoutez les adresses IP/Noms de domaine suivants :</p>
+                      <ul className="list-disc pl-5 space-y-2 font-mono text-sm bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-4 rounded-xl">
+                        <li>portal.example.com</li>
+                        <li>{routerConfig.radiusAuthIp}</li>
+                      </ul>
+                    </div>
+                 )}
+
+                 {selectedRouterGuide === 'mikrotik' && (
+                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                      <p>Connectez-vous via Winbox ou ouvrez un terminal MikroTik et exécutez le script suivant :</p>
+                      
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Ajouter le serveur RADIUS</h4>
+                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
+                        /radius add address={routerConfig.radiusAuthIp} secret="{routerConfig.radiusSecret}" service=hotspot
+                      </div>
+
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Configurer le profil du Hotspot Serveur</h4>
+                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
+                        /ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes login-by=mac,cookie,http-chap
+                      </div>
+
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">3. Autoriser les domaines du portail (Walled Garden)</h4>
+                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
+                        /ip hotspot walled-garden add dst-host="portal.example.com" action=allow<br/>
+                        /ip hotspot walled-garden ip add dst-address="{routerConfig.radiusAuthIp}" action=accept
+                      </div>
+                    </div>
+                 )}
+
+                 {selectedRouterGuide === 'openwrt' && (
+                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Prérequis</h4>
+                      <p>Vérifiez que le package <code>coova-chilli</code> est installé sur votre routeur OpenWRT.</p>
+                      
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Configuration du fichier /etc/config/chilli</h4>
+                      <p>Modifiez le fichier pour refléter ces paramètres :</p>
+                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto whitespace-pre-wrap">
+{`config chilli
+    option radiusserver1 '${routerConfig.radiusAuthIp}'
+    option radiusserver2 '${routerConfig.radiusAcctIp}'
+    option radiussecret '${routerConfig.radiusSecret}'
+    option uamserver '${routerConfig.portalUrl}'
+    option uamallowed 'portal.example.com,${routerConfig.radiusAuthIp}'
+    option radauthport '${routerConfig.radiusAuthPort}'
+    option radacctport '${routerConfig.radiusAcctPort}'`}
+                      </div>
+
+                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Redémarrer le service</h4>
+                      <p>Appliquez les changements en redémarrant CoovaChilli :</p>
+                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
+                        /etc/init.d/chilli restart
+                      </div>
+                    </div>
+                 )}
+
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3 relative z-10 shrink-0">
+               <button 
+                 onClick={async () => {
+                   try {
+                     const html2canvas = (await import('html2canvas')).default;
+                     const jsPDF = (await import('jspdf')).default;
+                     const element = document.getElementById('router-guide-element');
+                     if (element) {
+                       const originalTransform = element.style.transform;
+                       const isPreviewModeNow = isGuidePreviewMode;
+                       
+                       if (isPreviewModeNow) {
+                         element.style.transform = 'none';
+                         await new Promise(resolve => setTimeout(resolve, 50));
+                       }
+                       
+                       const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+                       
+                       if (isPreviewModeNow) {
+                         element.style.transform = originalTransform;
+                       }
+                       
+                       const imgData = canvas.toDataURL('image/png');
+                       const pdf = new jsPDF('p', 'pt', 'a4');
+                       const pdfWidth = pdf.internal.pageSize.getWidth();
+                       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                       pdf.save(`guide-configuration-${selectedRouterGuide}.pdf`);
+                     }
+                   } catch (err) {
+                     console.error("Failed to generate PDF", err);
+                   }
+                 }}
+                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+               >
+                 <Download size={18} /> Télécharger en PDF
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Print Voucher Modal */}
       {selectedVoucherForPrint && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all ${isPreviewMode ? 'overflow-y-auto items-start pt-8 pb-8' : ''}`}>
@@ -4712,7 +5071,7 @@ export default function Dashboard() {
                   <option value="1 heure">1 heure</option>
                   <option value="2 heures">2 heures</option>
                   <option value="24 heures">24 heures</option>
-                  <option value="1 semaine" selected>1 semaine</option>
+                  <option value="1 semaine">1 semaine</option>
                   <option value="1 mois">1 mois</option>
                 </select>
               </div>
@@ -5124,16 +5483,27 @@ export default function Dashboard() {
       {/* Pricing Modal */}
       {showPricingModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl">
-            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Gérer les Tarifs</h3>
-              <button onClick={() => setShowPricingModal(false)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm">
-                <X size={18} />
-              </button>
+          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 shrink-0">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Gérer les Tarifs (Forfaits)</h3>
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => fetchStripeProducts(currentLocationForPricing?.id)}
+                  disabled={isFetchingStripeProducts}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm bg-indigo-50 text-indigo-600 rounded-lg font-medium hover:bg-indigo-100 transition-colors"
+                >
+                  {isFetchingStripeProducts ? <div className="w-3 h-3 border-2 border-indigo-600/30 border-t-indigo-600 animate-spin rounded-full"></div> : <RefreshCw size={14} />}
+                  Stripe
+                </button>
+                <button onClick={() => setShowPricingModal(false)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
-            <form onSubmit={handleSavePricingConfig} className="p-6 space-y-5">
+            <form onSubmit={handleSavePricingConfig} className="p-6 space-y-5 overflow-y-auto">
               <div>
-                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Devise</label>
+                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Devise Principale</label>
                 <div className="grid grid-cols-3 gap-3">
                   <button type="button" onClick={() => setPricingConfigPreview({...pricingConfigPreview, currency: 'eur'})} className={`py-2 rounded-xl flex items-center justify-center font-bold text-sm border-2 transition-colors ${pricingConfigPreview.currency === 'eur' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : 'border-transparent bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10'}`}>
                     € EUR
@@ -5146,27 +5516,111 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 1 Heure</label>
-                   <div className="relative">
-                      <input type="number" min="0" step="0.5" required value={pricingConfigPreview.price1h} onChange={(e) => setPricingConfigPreview({...pricingConfigPreview, price1h: Number(e.target.value)})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl pl-9 px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 font-medium">
-                        {pricingConfigPreview.currency === 'usd' ? '$' : pricingConfigPreview.currency === 'gbp' ? '£' : '€'}
-                      </span>
-                   </div>
+              
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300">Vos Forfaits</label>
+                  <button 
+                    type="button" 
+                    onClick={() => {
+                      const newPass = { id: Date.now().toString(), name: 'Nouveau Pass', price: 5, duration: 60, stripePriceId: '' };
+                      setPricingConfigPreview({ ...pricingConfigPreview, passes: [...pricingConfigPreview.passes, newPass] });
+                    }}
+                    className="text-indigo-600 text-sm font-medium hover:text-indigo-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Ajouter un forfait
+                  </button>
                 </div>
-                <div>
-                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Pass 24 Heures</label>
-                   <div className="relative">
-                      <input type="number" min="0" step="0.5" required value={pricingConfigPreview.price24h} onChange={(e) => setPricingConfigPreview({...pricingConfigPreview, price24h: Number(e.target.value)})} className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl pl-9 px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" />
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-slate-400 font-medium">
-                        {pricingConfigPreview.currency === 'usd' ? '$' : pricingConfigPreview.currency === 'gbp' ? '£' : '€'}
-                      </span>
-                   </div>
+                
+                <div className="space-y-3">
+                  {pricingConfigPreview.passes.map((pass, index) => (
+                    <div key={pass.id} className="p-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl relative">
+                       <button 
+                         type="button"
+                         onClick={() => {
+                           const newPasses = [...pricingConfigPreview.passes];
+                           newPasses.splice(index, 1);
+                           setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                         }}
+                         className="absolute top-4 right-4 text-slate-400 hover:text-red-500 transition-colors"
+                       >
+                         <Trash2 size={16} />
+                       </button>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                         <div>
+                           <label className="block text-xs font-semibold text-slate-500 mb-1">Nom du forfait</label>
+                           <input type="text" required value={pass.name} onChange={(e) => {
+                             const newPasses = [...pricingConfigPreview.passes];
+                             newPasses[index].name = e.target.value;
+                             setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                           }} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                         </div>
+                         <div>
+                           <label className="block text-xs font-semibold text-slate-500 mb-1">Durée temporelle</label>
+                           <select value={pass.duration} onChange={(e) => {
+                             const newPasses = [...pricingConfigPreview.passes];
+                             newPasses[index].duration = Number(e.target.value);
+                             setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                           }} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white">
+                             <option value={15}>15 Minutes</option>
+                             <option value={30}>30 Minutes</option>
+                             <option value={60}>1 Heure</option>
+                             <option value={120}>2 Heures</option>
+                             <option value={1440}>24 Heures</option>
+                             <option value={10080}>1 Semaine</option>
+                             <option value={43200}>1 Mois</option>
+                           </select>
+                         </div>
+                         <div>
+                           <label className="block text-xs font-semibold text-slate-500 mb-1">Prix ({pricingConfigPreview.currency.toUpperCase()})</label>
+                           <input type="number" min="0" step="0.5" required value={pass.price} onChange={(e) => {
+                             const newPasses = [...pricingConfigPreview.passes];
+                             newPasses[index].price = Number(e.target.value);
+                             setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                           }} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                         </div>
+                         <div>
+                           <label className="block text-xs font-semibold text-slate-500 mb-1 flex items-center justify-between">
+                             Lien Produit Stripe <span className="text-[10px] text-indigo-500 font-normal ml-2">(Optionnel)</span>
+                           </label>
+                           {stripeProducts.length > 0 ? (
+                             <select value={pass.stripePriceId || ''} onChange={(e) => {
+                               const newPasses = [...pricingConfigPreview.passes];
+                               newPasses[index].stripePriceId = e.target.value;
+                               const selectedProd = stripeProducts.find(p => p.priceId === e.target.value);
+                               if (selectedProd) {
+                                  newPasses[index].price = selectedProd.priceAmount / 100;
+                                  newPasses[index].name = selectedProd.name;
+                               }
+                               setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                             }} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white">
+                               <option value="">Aucun lien - Prix personnalisé</option>
+                               {stripeProducts.map(prod => (
+                                 <option key={prod.priceId} value={prod.priceId}>
+                                   {prod.name} ({(prod.priceAmount / 100).toFixed(2)} {prod.currency.toUpperCase()})
+                                 </option>
+                               ))}
+                             </select>
+                           ) : (
+                             <input type="text" placeholder="ex: price_1xyz..." value={pass.stripePriceId} onChange={(e) => {
+                               const newPasses = [...pricingConfigPreview.passes];
+                               newPasses[index].stripePriceId = e.target.value;
+                               setPricingConfigPreview({ ...pricingConfigPreview, passes: newPasses });
+                             }} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white" />
+                           )}
+                         </div>
+                       </div>
+                    </div>
+                  ))}
+                  {pricingConfigPreview.passes.length === 0 && (
+                    <div className="text-center py-6 text-slate-500 text-sm bg-slate-50 dark:bg-white/5 rounded-xl border border-dashed border-slate-300 dark:border-white/20">
+                      Aucun forfait tarifaire défini. Cliquez ci-dessus pour ajouter.
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="pt-4 flex justify-end gap-3">
+              
+              <div className="pt-4 flex justify-end gap-3 shrink-0">
                 <button type="button" onClick={() => setShowPricingModal(false)} className="px-4 py-2 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 rounded-xl font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
                   Annuler
                 </button>
@@ -5390,6 +5844,59 @@ export default function Dashboard() {
                 
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5 space-y-4">
                   <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                    <PlayCircle size={18} className="text-pink-500" />
+                    Publicité Dynamique
+                  </h4>
+                  
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Type de média</label>
+                    <div className="flex bg-slate-50 dark:bg-white/5 p-1 rounded-xl mb-3">
+                      <button 
+                        type="button"
+                        onClick={() => setPortalConfigPreview({ ...portalConfigPreview, adMediaType: 'image' })}
+                        className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${portalConfigPreview.adMediaType === 'image' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                      >
+                        Image / Bannière
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setPortalConfigPreview({ ...portalConfigPreview, adMediaType: 'video' })}
+                        className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${portalConfigPreview.adMediaType === 'video' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                      >
+                        Vidéo MP4
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL du média (Optionnel)</label>
+                    <input 
+                      type="url"
+                      name="adMediaUrl"
+                      value={portalConfigPreview.adMediaUrl}
+                      onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, adMediaUrl: e.target.value })}
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors mb-2"
+                      placeholder="https://example.com/ad.jpg"
+                    />
+                    <p className="text-xs text-slate-500">Laissez vide pour utiliser l'image par défaut.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Durée de la publicité (secondes)</label>
+                    <input 
+                      type="number"
+                      name="adDuration"
+                      min="1"
+                      max="60"
+                      value={portalConfigPreview.adDuration}
+                      onChange={(e) => setPortalConfigPreview({ ...portalConfigPreview, adDuration: Number(e.target.value) })}
+                      className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 dark:border-white/5 space-y-4">
+                  <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                     <Clock size={18} className="text-pink-500" />
                     Limites de Session (Wi-Fi Manager)
                   </h4>
@@ -5495,59 +6002,16 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <div className={`bg-[#f8fafc] rounded-[2.5rem] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl relative overflow-hidden flex flex-col shrink-0 transition-all duration-300 ease-in-out ${previewDeviceSize === 'sm' ? 'w-[320px] h-[568px]' : previewDeviceSize === 'lg' ? 'w-[480px] h-[650px]' : 'w-[375px] h-[650px]'} ${portalConfigPreview.layoutTheme === 'elegant' ? 'bg-slate-900 text-slate-100 font-serif' : ''} ${portalConfigPreview.layoutTheme === 'modern' ? 'bg-slate-100' : ''}`}>
+                <div className={`bg-[#f8fafc] dark:bg-[#050614] rounded-[2.5rem] border-[8px] border-slate-800 dark:border-slate-700 shadow-2xl relative overflow-hidden flex flex-col shrink-0 transition-all duration-300 ease-in-out ${previewDeviceSize === 'sm' ? 'w-[320px] h-[568px]' : previewDeviceSize === 'lg' ? 'w-[480px] h-[650px]' : 'w-[375px] h-[650px]'}`}>
                    {/* Notch */}
-                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-800 dark:bg-slate-700 rounded-b-xl z-20"></div>
+                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-800 dark:bg-slate-700 rounded-b-xl z-20 pointer-events-none"></div>
                    
-                   <div className={`flex-1 overflow-y-auto flex relative p-6 pt-16 ${portalConfigPreview.layoutTheme === 'modern' ? 'flex-col justify-end pb-8' : 'flex-col items-center'}`}>
-                        {portalConfigPreview.layoutTheme === 'modern' && portalConfigPreview.logoUrl && (
-                           <div className="absolute inset-0 opacity-20 bg-cover bg-center" style={{ backgroundImage: `url(${portalConfigPreview.logoUrl})`, filter: 'blur(10px)' }}></div>
-                        )}
-
-                        <div className={`w-full relative z-10 flex flex-col ${portalConfigPreview.layoutTheme === 'modern' ? 'bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-xl' : portalConfigPreview.layoutTheme === 'minimal' ? 'items-center flex-1 justify-center' : 'items-center'}`}>
-                            {portalConfigPreview.layoutTheme !== 'modern' && (
-                                <>
-                                    {portalConfigPreview.logoUrl ? (
-                                        <img src={portalConfigPreview.logoUrl} alt="Logo" className={`object-contain mb-8 ${portalConfigPreview.layoutTheme === 'minimal' ? 'w-32 h-32' : 'w-24 h-24 rounded-2xl shadow-sm bg-white'}`} style={portalConfigPreview.layoutTheme === 'elegant' ? { borderRadius: '50%' } : {}} />
-                                    ) : (
-                                        <div className={`bg-white rounded-2xl shadow-sm flex items-center justify-center mb-8 border border-slate-100 ${portalConfigPreview.layoutTheme === 'minimal' ? 'w-32 h-32' : 'w-24 h-24'}`} style={portalConfigPreview.layoutTheme === 'elegant' ? { borderRadius: '50%', backgroundColor: '#1e293b', borderColor: '#334155' } : {}}>
-                                        <Wifi className={portalConfigPreview.layoutTheme === 'elegant' ? 'text-slate-400' : 'text-slate-300'} size={40} />
-                                        </div>
-                                    )}
-                                </>
-                            )}
-
-                            {portalConfigPreview.layoutTheme === 'modern' && portalConfigPreview.logoUrl && (
-                                <img src={portalConfigPreview.logoUrl} alt="Logo" className="w-16 h-16 object-contain mb-6 rounded-2xl bg-white shadow-sm self-start" />
-                            )}
-
-                            <h2 className={`text-xl font-bold text-center mb-3 ${portalConfigPreview.layoutTheme === 'elegant' ? 'text-white font-serif text-2xl tracking-wide' : 'text-slate-900'} ${portalConfigPreview.layoutTheme === 'modern' ? 'text-left' : ''}`}>
-                            {portalConfigPreview.welcomeMessage || `Bienvenue au ${currentLocationForPortal?.name || 'réseau'}`}
-                            </h2>
-                            
-                            {portalConfigPreview.layoutTheme !== 'minimal' && (
-                                <p className={`text-center text-sm mb-8 ${portalConfigPreview.layoutTheme === 'elegant' ? 'text-slate-400' : 'text-slate-500'} ${portalConfigPreview.layoutTheme === 'modern' ? 'text-left mb-6' : ''}`}>
-                                  {portalConfigPreview.sessionDuration > 0 ? `Connectez-vous pour profiter de ${portalConfigPreview.sessionDuration >= 60 ? Math.floor(portalConfigPreview.sessionDuration/60) + 'h' + (portalConfigPreview.sessionDuration%60 > 0 ? portalConfigPreview.sessionDuration%60 : '') : portalConfigPreview.sessionDuration + ' min'} de Wi-Fi gratuit.` : "Connectez-vous pour accéder au Wi-Fi gratuit."}
-                                </p>
-                            )}
-                            
-                            <button 
-                                type="button"
-                                style={{ backgroundColor: portalConfigPreview.themeColor || '#6366f1' }}
-                                className={`w-full py-4 text-white font-bold text-lg shadow-lg mb-6 transition-transform active:scale-95 ${portalConfigPreview.layoutTheme === 'elegant' ? 'rounded-md uppercase tracking-wider text-sm shadow-black/50' : 'rounded-xl'}`}
-                            >
-                                {portalConfigPreview.layoutTheme === 'minimal' ? 'Connexion Automatique' : 'Se connecter'}
-                            </button>
-
-                            <div className={`text-xs text-center w-full ${portalConfigPreview.layoutTheme === 'elegant' ? 'text-slate-500 mt-8' : 'text-slate-400'} ${portalConfigPreview.layoutTheme === 'modern' ? 'mt-2' : 'mt-auto pt-8 pb-4'}`}>
-                                {portalConfigPreview.termsOfService ? (
-                                    <p className="whitespace-pre-line">{portalConfigPreview.termsOfService}</p>
-                                ) : (
-                                    <p>En vous connectant, vous acceptez les conditions générales d'utilisation de ce réseau.</p>
-                                )}
-                            </div>
-                        </div>
-                   </div>
+                   <iframe 
+                     ref={previewIframeRef}
+                     src={`/portal?demo=true&preview=true`}
+                     className="w-full h-full border-none"
+                     title="Live Preview"
+                   ></iframe>
                 </div>
             </div>
           </div>

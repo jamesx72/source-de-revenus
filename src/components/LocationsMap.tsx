@@ -70,8 +70,8 @@ export function LocationMarkers({ locations }: { locations: any[] }) {
 }
 
 export function LocationsMapView({ locations }: { locations: any[] }) {
-  const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
-  const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+  const API_KEY = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAwV1JmlKY23gxoYSMvm3kBpVl_0ZAeCFk';
+  const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY' && API_KEY.startsWith('AIza');
 
   if (!hasValidKey) {
     return (
@@ -79,11 +79,11 @@ export function LocationsMapView({ locations }: { locations: any[] }) {
          <div className="p-3 bg-indigo-500/10 text-indigo-500 rounded-xl mb-4">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
          </div>
-         <h3 className="font-semibold text-slate-900 dark:text-white mb-2">Clé API Google Maps Requise</h3>
-         <p className="text-slate-500 dark:text-slate-400 text-sm mb-4 max-w-sm">Pour afficher la carte des établissements, vous devez configurer la clé API Google Maps Platform.</p>
+         <h3 className="font-semibold text-slate-900 dark:text-white mb-2">Clé API Google Maps Invalide ou Manquante</h3>
+         <p className="text-slate-500 dark:text-slate-400 text-sm mb-4 max-w-sm">Pour afficher la carte des établissements, vous devez configurer une clé API Google Maps valide (commençant par "AIza").</p>
          <div className="text-xs text-left max-w-sm mx-auto text-slate-400 space-y-2">
-           <p>1. <a href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline hover:text-indigo-300">Obtenir une clé API</a></p>
-           <p>2. Ajouter le secret <code>GOOGLE_MAPS_PLATFORM_KEY</code> dans les <strong className="text-slate-300">Settings</strong> (⚙️ en haut à droite) → <strong className="text-slate-300">Secrets</strong></p>
+           <p>1. <a href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline hover:text-indigo-300">Obtenir une vraie clé API</a></p>
+           <p>2. Ajouter le secret <code>VITE_GOOGLE_MAPS_API_KEY</code> dans les <strong className="text-slate-300">Settings</strong> (⚙️ en haut à droite) → <strong className="text-slate-300">Secrets</strong></p>
          </div>
       </div>
     );

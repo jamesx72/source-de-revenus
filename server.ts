@@ -547,6 +547,55 @@ async function startServer() {
   });
 
   // Stripe Checkout Endpoint
+  app.get("/api/stripe-products", async (req, res) => {
+    try {
+      const stripeSecret = process.env.STRIPE_SECRET_KEY;
+      if (!stripeSecret) {
+        return res.status(500).json({ error: "missing STRIPE_SECRET_KEY environment variable." });
+      }
+
+      const locationId = req.query.locationId as string;
+      if (!locationId) return res.status(400).json({ error: "Missing locationId" });
+
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+      const locDoc = await db.collection('locations').doc(locationId).get();
+      if (!locDoc.exists) return res.status(404).json({ error: "Location not found" });
+
+      const locData = locDoc.data();
+      const accountId = locData.stripeAccountId;
+
+      const Stripe = (await import('stripe')).default;
+      const stripe = new Stripe(stripeSecret);
+
+      let prices;
+      if (accountId) {
+        prices = await stripe.prices.list({ expand: ['data.product'], limit: 100 }, { stripeAccount: accountId });
+      } else {
+        prices = await stripe.prices.list({ expand: ['data.product'], limit: 100 });
+      }
+
+      const products = prices.data
+        .filter(price => price.active && (price.product as any).active)
+        .map(price => {
+          const product = price.product as any;
+          return {
+            priceId: price.id,
+            productId: product.id,
+            name: product.name,
+            description: product.description,
+            priceAmount: price.unit_amount,
+            currency: price.currency,
+            interval: price.type === 'recurring' ? price.recurring?.interval : 'one_time'
+          };
+        });
+
+      res.json({ products });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Unknown error" });
+    }
+  });
+
   app.post("/api/create-checkout-session", async (req, res) => {
     try {
       const stripeSecret = process.env.STRIPE_SECRET_KEY;
@@ -557,9 +606,11 @@ async function startServer() {
       const Stripe = (await import('stripe')).default;
       const stripe = new Stripe(stripeSecret);
 
-      const { locationId, userId, discountCode } = req.body;
+      const { locationId, userId, discountCode, priceId } = req.body;
       let { priceAmount, passName } = req.body;
       const appUrl = process.env.APP_URL || "http://localhost:3000";
+
+      let finalPriceAmount = priceAmount;
 
       // Apply discount if provided
       if (discountCode && db) {
@@ -573,36 +624,36 @@ async function startServer() {
           const discount = discountDoc.data();
           if (discount.maxUses === null || discount.uses < discount.maxUses) {
             if (discount.type === 'percentage') {
-              priceAmount = Math.max(0, Math.round(priceAmount * (1 - (discount.value / 100))));
+              finalPriceAmount = Math.max(0, Math.round(finalPriceAmount * (1 - (discount.value / 100))));
             } else if (discount.type === 'flat') {
               // Convert flat discount to cents first
-              priceAmount = Math.max(0, priceAmount - (discount.value * 100));
+              finalPriceAmount = Math.max(0, finalPriceAmount - (discount.value * 100));
             }
             // We should increment the uses later, maybe on successful payment.
           }
         }
       }
 
-      // Ensure priceAmount is at least 50 cents (Stripe minimum for EUR usually, but let's assume it handles 0 or free somehow, actually Stripe checkout min is 0.5 EUR)
-      // Since it's checkout session, if it's 0 we might need a different flow. But for now let's just make it minimum 50 cents if it's less than 50 and greater than 0, or just allow it to fail or be free if Stripe supports it (requires 100% discount differently, but assuming minimum 50 cents).
-      if (priceAmount > 0 && priceAmount < 50) priceAmount = 50;
+      if (!priceId) {
+        if (finalPriceAmount > 0 && finalPriceAmount < 50) finalPriceAmount = 50;
 
-      if (priceAmount === 0) {
-         // Free checkout bypass (needs frontend implementation, but for now we just use a minimum of 50 cents or handle later).
-         // Just a safeguard:
-         priceAmount = 50;
-         passName = passName + " (Discounted to min 0.50€)";
+        if (finalPriceAmount === 0) {
+           finalPriceAmount = 50;
+           passName = passName + " (Discounted to min 0.50€)";
+        }
       }
 
       let transfer_data: any = undefined;
+      let accountIdToUse: string | undefined = undefined;
+
       // Configure sub-merchant payout via Stripe Connect if applicable.
       if (db && locationId) {
         const locDoc = await db.collection('locations').doc(locationId).get();
         if (locDoc.exists) {
           const locData = locDoc.data();
           if (locData.stripeAccountId) {
-            // Keep 20% platform fee, 80% to the affiliated location sub-merchant.
-            const transferAmount = Math.round(priceAmount * 0.8);
+            accountIdToUse = locData.stripeAccountId;
+            const transferAmount = Math.round((finalPriceAmount || 0) * 0.8);
             if (transferAmount > 0) {
                 transfer_data = {
                   destination: locData.stripeAccountId,
@@ -612,21 +663,21 @@ async function startServer() {
         }
       }
 
+      const line_item = priceId ? { price: priceId, quantity: 1 } : {
+        price_data: {
+          currency: 'eur',
+          product_data: {
+            name: passName,
+            description: `Accès Wi-Fi pour ${passName}`,
+          },
+          unit_amount: finalPriceAmount,
+        },
+        quantity: 1,
+      };
+
       const sessionOpts: any = {
         ui_mode: 'embedded' as any,
-        line_items: [
-          {
-            price_data: {
-              currency: 'eur',
-              product_data: {
-                name: passName,
-                description: `Accès Wi-Fi pour ${passName}`,
-              },
-              unit_amount: priceAmount,
-            },
-            quantity: 1,
-          },
-        ],
+        line_items: [line_item],
         mode: 'payment',
         metadata: {
           locationId: locationId || '',
@@ -636,14 +687,16 @@ async function startServer() {
         return_url: `${appUrl}/portal?locationId=${locationId}&payment_success=true&session_id={CHECKOUT_SESSION_ID}`,
       };
 
-      if (transfer_data) {
+      if (transfer_data && !priceId) {
          sessionOpts.payment_intent_data = {
-           application_fee_amount: priceAmount - Math.round(priceAmount * 0.8),
+           application_fee_amount: finalPriceAmount - Math.round(finalPriceAmount * 0.8),
            transfer_data: transfer_data
          };
       }
 
-      const session = await stripe.checkout.sessions.create(sessionOpts);
+      const sessionRequestOpts = (accountIdToUse && priceId) ? { stripeAccount: accountIdToUse } : undefined;
+
+      const session = await stripe.checkout.sessions.create(sessionOpts, sessionRequestOpts);
 
       res.json({ clientSecret: session.client_secret });
     } catch (e: any) {
