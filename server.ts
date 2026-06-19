@@ -340,6 +340,22 @@ async function startServer() {
 
   app.use(express.json());
 
+  app.post("/api/ping-router", async (req, res) => {
+    try {
+      const ping = await import("ping");
+      const { host } = req.body;
+      if (!host) {
+        return res.status(400).json({ error: "Missing host" });
+      }
+
+      const resPing = await ping.promise.probe(host, { timeout: 2 });
+      res.json({ alive: resPing.alive, time: resPing.time });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Ping error" });
+    }
+  });
+
   // API endpoints
   app.post("/api/generate-theme", async (req, res) => {
     try {
@@ -363,7 +379,7 @@ async function startServer() {
       });
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-2.5-flash",
         contents: `Generate a captive portal branding configuration based on the following brand/industry description: "${prompt}". Provide a theme color (Hex code), a short welcome message, and choose the most appropriate layout theme from: 'default', 'minimal', 'elegant', or 'modern'.`,
         config: {
           responseMimeType: "application/json",

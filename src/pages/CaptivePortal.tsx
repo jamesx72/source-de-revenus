@@ -117,6 +117,7 @@ export default function CaptivePortal() {
   
   const [step, setStep] = useState<'home' | 'ad' | 'success' | 'payment' | 'payment_success'>('home');
   const [adProgress, setAdProgress] = useState(0);
+  const [activeAd, setActiveAd] = useState<any>(null);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
@@ -454,13 +455,28 @@ export default function CaptivePortal() {
     }
   };
 
-  const adDurationMs = (portalConfig?.adDuration || 5) * 1000;
-  
   const simulateAd = () => {
     setStep('ad');
+    
+    const adsToPlay = (portalConfig?.ads && portalConfig.ads.length > 0) 
+      ? portalConfig.ads 
+      : [{ mediaType: portalConfig?.adMediaType || 'image', mediaUrl: portalConfig?.adMediaUrl, duration: portalConfig?.adDuration || 5 }];
+
+    let nextAdIndex = parseInt(localStorage.getItem(`lastAdIndex_${locationId || 'demo'}`) || '0', 10);
+    if (nextAdIndex >= adsToPlay.length || isNaN(nextAdIndex)) {
+       nextAdIndex = 0;
+    }
+    
+    const currentAd = adsToPlay[nextAdIndex];
+    setActiveAd(currentAd);
+    
+    localStorage.setItem(`lastAdIndex_${locationId || 'demo'}`, ((nextAdIndex + 1) % adsToPlay.length).toString());
+
+    const currentAdDurationMs = (currentAd.duration || 5) * 1000;
+
     let progress = 0;
     const progressInterval = 100; // ms
-    const increment = (progressInterval / adDurationMs) * 100;
+    const increment = (progressInterval / currentAdDurationMs) * 100;
     
     const interval = setInterval(() => {
       progress += increment;
@@ -512,7 +528,7 @@ export default function CaptivePortal() {
     };
     window.addEventListener('t_test_ad_flow', handleTestAd as EventListener);
     return () => window.removeEventListener('t_test_ad_flow', handleTestAd as EventListener);
-  }, [adDurationMs]);
+  }, [portalConfig, locationId, isDemo, locationName, sessionDuration, locationOwnerId]);
 
   const activeThemeColor = portalConfig?.themeColor || '#6366f1';
   const layoutTheme = portalConfig?.layoutTheme || 'default';
@@ -814,12 +830,12 @@ export default function CaptivePortal() {
               >
                 <div className="flex-1 relative flex items-center justify-center bg-black">
                   <div className="absolute top-6 right-6 text-xs font-bold text-white bg-black/60 border border-white/20 px-3 py-1.5 rounded-full z-20 backdrop-blur-md">
-                    Publicité - {Math.ceil(((portalConfig?.adDuration || 5) * (1 - adProgress / 100)))}s
+                    Publicité - {Math.ceil(((activeAd?.duration || portalConfig?.adDuration || 5) * (1 - adProgress / 100)))}s
                   </div>
                   
-                  {portalConfig?.adMediaType === 'video' ? (
+                  {(activeAd?.mediaType || portalConfig?.adMediaType) === 'video' ? (
                     <video 
-                      src={portalConfig?.adMediaUrl || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"} 
+                      src={activeAd?.mediaUrl || portalConfig?.adMediaUrl || "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"} 
                       className="absolute inset-0 w-full h-full object-cover opacity-80"
                       autoPlay
                       muted
@@ -828,14 +844,14 @@ export default function CaptivePortal() {
                     />
                   ) : (
                     <img 
-                      src={portalConfig?.adMediaUrl || "https://images.unsplash.com/photo-1616077168079-7e09a6a575fd?auto=format&fit=crop&q=80&w=600"} 
+                      src={activeAd?.mediaUrl || portalConfig?.adMediaUrl || "https://images.unsplash.com/photo-1616077168079-7e09a6a575fd?auto=format&fit=crop&q=80&w=600"} 
                       className="absolute inset-0 w-full h-full object-cover opacity-80"
                       alt="Ad Background"
                       referrerPolicy="no-referrer"
                     />
                   )}
 
-                  {!portalConfig?.adMediaUrl && (
+                  {!(activeAd?.mediaUrl || portalConfig?.adMediaUrl) && (
                     <div className="text-center p-8 z-10 relative pointer-events-none">
                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/30 rounded-full blur-[60px]"></div>
                       <div className="w-20 h-20 bg-indigo-500 rounded-full mx-auto mb-6 flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.6)] relative z-10">

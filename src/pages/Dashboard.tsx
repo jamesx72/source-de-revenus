@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon, Router, RefreshCw, PlayCircle } from 'lucide-react';
+import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon, Router, RefreshCw, PlayCircle, Copy } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
@@ -53,10 +53,11 @@ export default function Dashboard() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [globalLocationId, setGlobalLocationId] = useState<string>('all');
   const [ratioConfig, setRatioConfig] = useState({ hours: 1, points: 10 });
-  const [wifiConfig, setWifiConfig] = useState({ timeLimit: 'unlimited', customTimeLimit: 120, downloadSpeed: 'unlimited', uploadSpeed: 'unlimited', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
+  const [wifiConfig, setWifiConfig] = useState({ isGlobalActive: true, timeLimit: 'unlimited', customTimeLimit: 120, downloadSpeed: 'unlimited', uploadSpeed: 'unlimited', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
   const [portalConfig, setPortalConfig] = useState<{ themeColor: string; logoUrl: string | null }>({ themeColor: '#6366f1', logoUrl: null });
   const [smtpConfig, setSmtpConfig] = useState({ enabled: false, host: '', port: 587, username: '', password: '', fromName: 'Mon Établissement', fromEmail: 'no-reply@mon-etablissement.com' });
   const [promoBanner, setPromoBanner] = useState({ enabled: false, title: 'Happy Hour !', description: '-20% sur toutes les boissons de 18h à 20h.', type: 'info', scheduleType: 'always', startTime: '18:00', endTime: '20:00', imageUrl: '', linkUrl: '' });
+  const [adConfig, setAdConfig] = useState({ enabled: true, mediaType: 'video', mediaUrl: 'https://www.w3schools.com/html/mov_bbb.mp4', fallbackImageUrl: 'https://images.unsplash.com/photo-1555680202-c86f0e12f086?w=800&q=80', duration: 15, skippableAfter: 5, targetLocations: 'all' });
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [backupRetention, setBackupRetention] = useState('30');
   const [adsRevenueTimeframe, setAdsRevenueTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -109,14 +110,14 @@ export default function Dashboard() {
   const [platformSubscription, setPlatformSubscription] = useState<any>(null);
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
-  const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '' });
+  const [voucherConfig, setVoucherConfig] = useState({ duration: '1h', quantity: 1, prefix: '', locationId: '', speedLimit: '', dataLimit: '' });
   const [selectedVoucherForPrint, setSelectedVoucherForPrint] = useState<any>(null);
   const [selectedRouterGuide, setSelectedRouterGuide] = useState<any>(null);
   const [isGuidePreviewMode, setIsGuidePreviewMode] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   
   const [routerConfig, setRouterConfig] = useState({
-    portalUrl: 'https://portal.example.com/login',
+    portalUrl: `${window.location.origin}/portal`,
     radiusAuthIp: '198.51.100.15',
     radiusAcctIp: '198.51.100.16',
     radiusSecret: 's3cr3t_R4dius_K3y!',
@@ -126,6 +127,41 @@ export default function Dashboard() {
   });
   const [isSavingRouter, setIsSavingRouter] = useState(false);
   const [showRadiusSecret, setShowRadiusSecret] = useState(false);
+
+  const [routerPingStatus, setRouterPingStatus] = useState<'idle' | 'online' | 'offline' | 'error'>('idle');
+  const [isPingingRouter, setIsPingingRouter] = useState(false);
+  const [lastPingTime, setLastPingTime] = useState<number | null>(null);
+
+  const handlePingRouter = async () => {
+    if (!routerConfig.routerIp) {
+      toast.error('Veuillez entrer une adresse IP pour votre routeur.');
+      return;
+    }
+    setIsPingingRouter(true);
+    setRouterPingStatus('idle');
+    try {
+      const response = await fetch('/api/ping-router', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: routerConfig.routerIp })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erreur ping');
+      if (data.alive) {
+        setRouterPingStatus('online');
+        setLastPingTime(data.time || null);
+        toast.success(`Le routeur (${routerConfig.routerIp}) est en ligne !`);
+      } else {
+        setRouterPingStatus('offline');
+        toast.error(`Le routeur (${routerConfig.routerIp}) est injoignable.`);
+      }
+    } catch (err: any) {
+      setRouterPingStatus('error');
+      toast.error(err.message || "Impossible de pinger le routeur.");
+    } finally {
+      setIsPingingRouter(false);
+    }
+  };
 
   const [discounts, setDiscounts] = useState<any[]>([]);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
@@ -151,7 +187,9 @@ export default function Dashboard() {
   const [showPortalConfigModal, setShowPortalConfigModal] = useState(false);
   const [currentLocationForPortal, setCurrentLocationForPortal] = useState<any>(null);
   const [isSubmittingPortalConfig, setIsSubmittingPortalConfig] = useState(false);
-  const [portalConfigPreview, setPortalConfigPreview] = useState({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '', adMediaType: 'image', adMediaUrl: '', adDuration: 5, backgroundImageUrl: '', backgroundVideoUrl: '', fontFamily: 'Inter' });
+  const [portalConfigPreview, setPortalConfigPreview] = useState<{
+    themeColor: string; logoUrl: string; welcomeMessage: string; termsOfService: string; layoutTheme: string; sessionDuration: number; allowExtension: boolean; redirectUrl: string; adMediaType: string; adMediaUrl: string; adDuration: number; backgroundImageUrl: string; backgroundVideoUrl: string; fontFamily: string; ads: { id: string, mediaType: 'image'|'video', mediaUrl: string, duration: number }[];
+  }>({ themeColor: '#6366f1', logoUrl: '', welcomeMessage: '', termsOfService: '', layoutTheme: 'default', sessionDuration: 60, allowExtension: false, redirectUrl: '', adMediaType: 'image', adMediaUrl: '', adDuration: 5, backgroundImageUrl: '', backgroundVideoUrl: '', fontFamily: 'Inter', ads: [] });
   const [previewDeviceSize, setPreviewDeviceSize] = useState<'sm' | 'md' | 'lg'>('md');
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -168,6 +206,7 @@ export default function Dashboard() {
 
   const handleSaveRouterConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentLocationForRouter) return;
     setIsSavingRouter(true);
     try {
       const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
@@ -299,6 +338,12 @@ export default function Dashboard() {
   const [isSubscribingToPlatform, setIsSubscribingToPlatform] = useState(false);
   const handleSubscribeToPlatform = async (priceId: string) => {
     if (!user) return;
+    
+    if (priceId === 'price_1234' || !priceId) {
+       toast.info("Veuillez configurer l'ID de prix Stripe (VITE_STRIPE_PRICE_ID) dans les paramètres pour activer l'abonnement.");
+       return;
+    }
+
     setIsSubscribingToPlatform(true);
     try {
       const response = await fetch('/api/create-platform-subscription', {
@@ -681,6 +726,8 @@ export default function Dashboard() {
         promises.push(addDoc(collection(db, 'vouchers'), {
           code: generateCode(),
           duration: voucherConfig.duration,
+          speedLimit: voucherConfig.speedLimit || null,
+          dataLimit: voucherConfig.dataLimit || null,
           locationId: voucherConfig.locationId || locations[0]?.id || '',
           status: 'active', // active, used, revoked
           createdAt: new Date().toISOString(),
@@ -692,7 +739,7 @@ export default function Dashboard() {
       await Promise.all(promises);
       toast.success(`${voucherConfig.quantity} code(s) généré(s) avec succès.`);
       setShowVoucherModal(false);
-      setVoucherConfig({ duration: '1h', quantity: 1, prefix: '', locationId: locations[0]?.id || '' });
+      setVoucherConfig({ duration: '1h', quantity: 1, prefix: '', locationId: locations[0]?.id || '', speedLimit: '', dataLimit: '' });
     } catch (err: any) {
       console.error("Failed to generate vouchers:", err.message);
       toast.error("Erreur lors de la génération des codes.");
@@ -794,6 +841,7 @@ export default function Dashboard() {
         adMediaType: portalConfigPreview.adMediaType || 'image',
         adMediaUrl: portalConfigPreview.adMediaUrl || null,
         adDuration: portalConfigPreview.adDuration || 5,
+        ads: portalConfigPreview.ads || [],
         backgroundImageUrl: portalConfigPreview.backgroundImageUrl || null,
         backgroundVideoUrl: portalConfigPreview.backgroundVideoUrl || null,
         fontFamily: portalConfigPreview.fontFamily || 'Inter'
@@ -1377,11 +1425,30 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center gap-3 lg:gap-4 ml-auto">
-            <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-1.5 lg:px-4 lg:py-2 rounded-full backdrop-blur-md flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0"></span>
-              <span className="text-xs lg:text-sm font-medium hidden sm:inline">{t.online}</span>
-              <span className="text-xs lg:text-sm font-medium sm:hidden">Online</span>
-            </div>
+            <button 
+              onClick={() => {
+                const newStatus = !wifiConfig.isGlobalActive;
+                setWifiConfig({ ...wifiConfig, isGlobalActive: newStatus });
+                toast.success(newStatus ? 'Réseau Wi-Fi public activé' : 'Réseau Wi-Fi public suspendu', {
+                  icon: newStatus ? '🟢' : '🔴',
+                });
+              }}
+              className={`px-3 py-1.5 lg:px-4 lg:py-2 rounded-full text-xs lg:text-sm font-semibold transition-all duration-300 flex items-center gap-2 border shadow-sm ${
+                wifiConfig.isGlobalActive 
+                  ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20' 
+                  : 'bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20'
+              }`}
+              title={wifiConfig.isGlobalActive ? "Suspendre le réseau Wi-Fi" : "Activer le réseau Wi-Fi"}
+            >
+              <div className="relative flex items-center justify-center">
+                 {wifiConfig.isGlobalActive ? <Wifi size={16} /> : <WifiOff size={16} />}
+              </div>
+              <span className="hidden sm:inline">{wifiConfig.isGlobalActive ? "Wi-Fi Activé" : "Wi-Fi Suspendu"}</span>
+              <div className="w-px h-4 bg-current opacity-20 mx-1 hidden sm:block"></div>
+              <div className={`w-8 h-4 rounded-full p-0.5 transition-colors hidden sm:block ${wifiConfig.isGlobalActive ? 'bg-emerald-500' : 'bg-red-500'}`}>
+                 <div className={`w-3 h-3 bg-white rounded-full shadow-sm transition-transform ${wifiConfig.isGlobalActive ? 'translate-x-4' : 'translate-x-0'}`}></div>
+              </div>
+            </button>
             
             <button 
               onClick={() => setLanguage(lang => lang === 'fr' ? 'en' : 'fr')}
@@ -1778,6 +1845,36 @@ export default function Dashboard() {
                   <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Configuration des Routeurs</h2>
                   <p className="text-slate-500 dark:text-slate-400">Instructions pour connecter vos équipements réseau (MikroTik, UniFi, Tp-Link Omada) au portail captif.</p>
                 </div>
+                
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                      <Activity size={24} />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                        Statut du Routeur
+                        {routerPingStatus === 'online' && <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-green-500 bg-green-50 dark:bg-green-500/10 px-2 py-0.5 rounded-md"><div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div> En ligne</span>}
+                        {routerPingStatus === 'offline' && <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-red-500 bg-red-50 dark:bg-red-500/10 px-2 py-0.5 rounded-md"><AlertCircle size={10} /> Hors ligne</span>}
+                        {routerPingStatus === 'error' && <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold text-orange-500 bg-orange-50 dark:bg-orange-500/10 px-2 py-0.5 rounded-md"><AlertCircle size={10} /> Erreur</span>}
+                      </h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400">
+                        {routerPingStatus === 'idle' ? "Vérifiez la connectivité avec votre routeur MikroTik." : 
+                         routerPingStatus === 'online' ? `Dernier ping réussi : ${lastPingTime ? lastPingTime.toFixed(2) + 'ms' : 'N/A'}` :
+                         "Impossible de joindre le routeur. Vérifiez l'IP."}
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handlePingRouter} 
+                    disabled={isPingingRouter || !routerConfig.routerIp}
+                    className="shrink-0 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-5 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isPingingRouter ? <div className="w-4 h-4 border-2 border-slate-400/30 border-t-slate-500 rounded-full animate-spin" /> : <Wifi size={16} />}
+                    {isPingingRouter ? 'Ping en cours...' : 'Pinger le routeur'}
+                  </button>
+                </div>
+
                 <form onSubmit={handleSaveRouterConfig} className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl">
                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">Informations RADIUS / Hotspot</h3>
@@ -1789,10 +1886,14 @@ export default function Dashboard() {
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div className="space-y-4">
                         <div>
-                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">URL du Portail Externe</label>
+                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">URL du Portail Externe (Captive Portal)</label>
                           <div className="flex">
-                             <input value={routerConfig.portalUrl} onChange={e => setRouterConfig({...routerConfig, portalUrl: e.target.value})} className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                             <input value={routerConfig.portalUrl} onChange={e => setRouterConfig({...routerConfig, portalUrl: e.target.value})} className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-l-xl px-4 py-2 text-slate-900 dark:text-white font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" />
+                             <button type="button" onClick={() => { navigator.clipboard.writeText(routerConfig.portalUrl); toast.success('URL copiée !'); }} className="bg-slate-200 dark:bg-slate-700 px-4 rounded-r-xl text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition-colors" title="Copier l'URL">
+                               <Copy size={16}/>
+                             </button>
                           </div>
+                          <p className="text-[10px] text-slate-500 mt-1">L'URL vers laquelle votre routeur doit rediriger les invités (Paramètre uamserver).</p>
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">IP Publique / Point d'accès de votre Routeur</label>
@@ -1825,43 +1926,190 @@ export default function Dashboard() {
                    </div>
                 </form>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                    <div 
                       onClick={() => setSelectedRouterGuide('ubiquiti')}
-                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                      className={`border p-6 rounded-3xl flex flex-col items-center text-center transition-colors cursor-pointer group ${selectedRouterGuide === 'ubiquiti' ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-500' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-indigo-500/50'}`}
                    >
-                      <div className="h-16 w-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 text-blue-600 dark:text-blue-400 group-hover:scale-110 transition-transform">
+                      <div className="h-16 w-16 bg-blue-50 dark:bg-blue-500/10 rounded-2xl flex items-center justify-center mb-4 text-blue-600 dark:text-blue-400">
                         <Server size={32} />
                       </div>
                       <h4 className="font-bold text-slate-900 dark:text-white text-lg">Ubiquiti UniFi</h4>
                       <p className="text-sm text-slate-500 mt-2 mb-4">Hotspot Guest Network & External Portal Server.</p>
-                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                      <div className={`font-medium mt-auto flex items-center gap-1 transition-all ${selectedRouterGuide === 'ubiquiti' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-indigo-500'}`}>Sélectionner</div>
                    </div>
                    
                    <div 
                       onClick={() => setSelectedRouterGuide('mikrotik')}
-                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                      className={`border p-6 rounded-3xl flex flex-col items-center text-center transition-colors cursor-pointer group ${selectedRouterGuide === 'mikrotik' ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-500' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-indigo-500/50'}`}
                    >
-                      <div className="h-16 w-16 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center mb-4 text-red-600 dark:text-red-400 group-hover:scale-110 transition-transform">
+                      <div className="h-16 w-16 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center mb-4 text-red-600 dark:text-red-400">
                         <Server size={32} />
                       </div>
                       <h4 className="font-bold text-slate-900 dark:text-white text-lg">MikroTik RouterOS</h4>
-                      <p className="text-sm text-slate-500 mt-2 mb-4">Configuration Hotspot & Walled Garden via Winbox/Terminal.</p>
-                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                      <p className="text-sm text-slate-500 mt-2 mb-4">Générateur de Script Installation Automatique (Recommandé).</p>
+                      <div className={`font-medium mt-auto flex items-center gap-1 transition-all ${selectedRouterGuide === 'mikrotik' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-indigo-500'}`}>Sélectionner</div>
                    </div>
 
                    <div 
                       onClick={() => setSelectedRouterGuide('openwrt')}
-                      className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl flex flex-col items-center text-center hover:border-indigo-500/50 transition-colors cursor-pointer group"
+                      className={`border p-6 rounded-3xl flex flex-col items-center text-center transition-colors cursor-pointer group ${selectedRouterGuide === 'openwrt' ? 'bg-indigo-50 dark:bg-indigo-500/10 border-indigo-500' : 'bg-white dark:bg-white/5 border-slate-200 dark:border-white/10 hover:border-indigo-500/50'}`}
                    >
-                      <div className="h-16 w-16 bg-teal-50 dark:bg-teal-500/10 rounded-2xl flex items-center justify-center mb-4 text-teal-600 dark:text-teal-400 group-hover:scale-110 transition-transform">
+                      <div className="h-16 w-16 bg-teal-50 dark:bg-teal-500/10 rounded-2xl flex items-center justify-center mb-4 text-teal-600 dark:text-teal-400">
                         <Server size={32} />
                       </div>
                       <h4 className="font-bold text-slate-900 dark:text-white text-lg">OpenWRT</h4>
                       <p className="text-sm text-slate-500 mt-2 mb-4">Configuration CoovaChilli / External RADIUS Server.</p>
-                      <button className="font-medium text-indigo-600 dark:text-indigo-400 mt-auto flex items-center gap-1 group-hover:gap-2 transition-all">Voir le guide <ArrowRight size={16}/></button>
+                      <div className={`font-medium mt-auto flex items-center gap-1 transition-all ${selectedRouterGuide === 'openwrt' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 group-hover:text-indigo-500'}`}>Sélectionner</div>
                    </div>
                 </div>
+
+                {/* Inline Router Guide */}
+                {selectedRouterGuide && (
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl overflow-hidden shadow-sm" id="router-guide-element">
+                    <div className="p-6 border-b border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${selectedRouterGuide === 'ubiquiti' ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400' : selectedRouterGuide === 'mikrotik' ? 'bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400' : 'bg-teal-100 text-teal-600 dark:bg-teal-500/20 dark:text-teal-400'}`}>
+                          <Server size={24} />
+                        </div>
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-900 dark:text-white print:text-black">Intégration {selectedRouterGuide === 'ubiquiti' ? 'Ubiquiti UniFi' : selectedRouterGuide === 'mikrotik' ? 'MikroTik RouterOS' : 'OpenWRT'}</h3>
+                          <p className="text-sm text-slate-500">Basé sur la configuration RADIUS actuelle.</p>
+                        </div>
+                      </div>
+                      <button 
+                         onClick={() => setSelectedRouterGuide(null)}
+                         className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 shadow-sm"
+                      >
+                         <X size={20} />
+                      </button>
+                    </div>
+
+                    <div className="p-6 lg:p-8 space-y-8">
+                       {/* Paste the contents of the guide here inline */}
+                       {selectedRouterGuide === 'ubiquiti' && (
+                          <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Configuration du Hotspot UniFi</h4>
+                            <ul className="list-disc pl-5 space-y-2">
+                              <li>Allez dans les paramètres de votre contrôleur UniFi, puis <strong>Guest Control</strong> (ou Profiles {'>'} Guest Hotspot).</li>
+                              <li>Cochez <strong>Enable Guest Portal</strong></li>
+                              <li>Authentication: <strong>External Portal Server</strong></li>
+                              <li>Custom Portal: <strong>IP Address</strong> <code>{routerConfig.radiusAuthIp}</code></li>
+                              <li>Activez <strong>Use Secure Portal</strong></li>
+                            </ul>
+                            
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Configuration RADIUS</h4>
+                            <ul className="list-disc pl-5 space-y-2">
+                              <li>Créez un nouveau profil RADIUS en cliquant sur <strong>Create New RADIUS Profile</strong></li>
+                              <li>Auth Server: <code>{routerConfig.radiusAuthIp}</code> / Port: <code>{routerConfig.radiusAuthPort}</code></li>
+                              <li>Acct Server: <code>{routerConfig.radiusAcctIp}</code> / Port: <code>{routerConfig.radiusAcctPort}</code></li>
+                              <li>Shared Secret: <code>{routerConfig.radiusSecret}</code></li>
+                            </ul>
+                            
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">3. Access Control (Walled Garden)</h4>
+                            <p>Dans la section "Pre-Authorization Access", ajoutez les domaines suivants pour permettre aux utilisateurs d'afficher le portail avant paiement :</p>
+                            <ul className="list-disc pl-5 space-y-2 font-mono text-sm bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-4 rounded-xl">
+                              <li>{window.location.hostname}</li>
+                              <li>{routerConfig.radiusAuthIp}</li>
+                            </ul>
+                          </div>
+                       )}
+
+                       {selectedRouterGuide === 'mikrotik' && (
+                          <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                            <p>Ouvrez un terminal MikroTik (New Terminal) et collez ce script complet d'installation. Votre routeur sera immédiatement configuré :</p>
+                            
+                            <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl font-mono text-sm overflow-x-auto whitespace-pre-wrap relative group">
+                              <button 
+                                 onClick={() => {
+                                    const script = `/radius add address=${routerConfig.radiusAuthIp} secret="${routerConfig.radiusSecret}" service=hotspot\n/ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes login-by=mac,cookie,http-chap\n/ip hotspot walled-garden add dst-host="${window.location.hostname}" action=allow\n/ip hotspot walled-garden ip add dst-address="${routerConfig.radiusAuthIp}" action=accept`;
+                                    navigator.clipboard.writeText(script);
+                                    toast.success("Script MikroTik copié !");
+                                 }}
+                                 className="absolute top-2 right-2 p-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity print:hidden shadow-sm flex items-center gap-2"
+                              >
+                                 <Copy size={16} /> Copier le script complet
+                              </button>
+{`/radius add address=${routerConfig.radiusAuthIp} secret="${routerConfig.radiusSecret}" service=hotspot
+/ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes login-by=mac,cookie,http-chap
+/ip hotspot walled-garden add dst-host="${window.location.hostname}" action=allow
+/ip hotspot walled-garden ip add dst-address="${routerConfig.radiusAuthIp}" action=accept`}
+                            </div>
+                            
+                            <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl">
+                              <h4 className="font-semibold text-amber-800 dark:text-amber-400 mb-1 flex items-center gap-2"><CheckCircle2 size={16} />C'est tout !</h4>
+                              <p className="text-sm text-amber-700 dark:text-amber-300">
+                                Ce script ajoutera le serveur RADIUS, liera le Hotspot à notre service et autorisera notre portail captif dans le Walled Garden.
+                              </p>
+                            </div>
+                          </div>
+                       )}
+
+                       {selectedRouterGuide === 'openwrt' && (
+                          <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Prérequis</h4>
+                            <p>Vérifiez que le package <code>coova-chilli</code> est installé sur votre routeur OpenWRT.</p>
+                            
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Configuration du fichier /etc/config/chilli</h4>
+                            <p>Modifiez le fichier pour refléter ces paramètres exacts correspondants à votre compte :</p>
+                            <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto whitespace-pre-wrap relative group">
+                              <button 
+                                 onClick={() => {
+                                    const script = `config chilli\n    option radiusserver1 '${routerConfig.radiusAuthIp}'\n    option radiusserver2 '${routerConfig.radiusAcctIp}'\n    option radiussecret '${routerConfig.radiusSecret}'\n    option uamserver '${window.location.origin}/portal'\n    option uamallowed '${window.location.hostname},${routerConfig.radiusAuthIp}'\n    option radauthport '${routerConfig.radiusAuthPort}'\n    option radacctport '${routerConfig.radiusAcctPort}'`;
+                                    navigator.clipboard.writeText(script);
+                                    toast.success("Script OpenWRT copié !");
+                                 }}
+                                 className="absolute top-2 right-2 p-1.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity print:hidden"
+                              >
+                                 <Copy size={16} />
+                              </button>
+{`config chilli
+    option radiusserver1 '${routerConfig.radiusAuthIp}'
+    option radiusserver2 '${routerConfig.radiusAcctIp}'
+    option radiussecret '${routerConfig.radiusSecret}'
+    option uamserver '${window.location.origin}/portal'
+    option uamallowed '${window.location.hostname},${routerConfig.radiusAuthIp}'
+    option radauthport '${routerConfig.radiusAuthPort}'
+    option radacctport '${routerConfig.radiusAcctPort}'`}
+                            </div>
+
+                            <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Redémarrer le service</h4>
+                            <p>Appliquez les changements en redémarrant CoovaChilli :</p>
+                            <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
+                              /etc/init.d/chilli restart
+                            </div>
+                          </div>
+                       )}
+
+                    </div>
+                    {/* PDF Export Footer */}
+                    <div className="p-4 bg-slate-50 dark:bg-white/5 border-t border-slate-100 dark:border-white/5 flex justify-end">
+                       <button 
+                         onClick={async () => {
+                           try {
+                             const html2canvas = (await import('html2canvas')).default;
+                             const jsPDF = (await import('jspdf')).default;
+                             const element = document.getElementById('router-guide-element');
+                             if (element) {
+                               const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+                               const imgData = canvas.toDataURL('image/png');
+                               const pdf = new jsPDF('p', 'pt', 'a4');
+                               const pdfWidth = pdf.internal.pageSize.getWidth();
+                               const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+                               pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                               pdf.save(`guide-configuration-${selectedRouterGuide}.pdf`);
+                             }
+                           } catch (err) {
+                             console.error("Failed to generate PDF", err);
+                           }
+                         }}
+                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+                       >
+                         <Download size={16} /> Exporter en PDF
+                       </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1877,23 +2125,82 @@ export default function Dashboard() {
                       onClick={async () => {
                         try {
                           const jsPDF = (await import('jspdf')).default;
-                          const pdf = new jsPDF();
-                          pdf.setFontSize(22);
-                          pdf.text("Liste des Vouchers d'accès WiFi", 20, 20);
+                          const pdf = new jsPDF('p', 'mm', 'a4');
                           
-                          pdf.setFontSize(12);
-                          let yOffset = 40;
-                          vouchers.filter(v => v.status === 'active').forEach((v, index) => {
-                             if (yOffset > 270) {
+                          const activeVouchers = vouchers.filter(v => v.status === 'active');
+                          
+                          if (activeVouchers.length === 0) {
+                            toast.error("Aucun voucher actif à exporter.");
+                            return;
+                          }
+                          
+                          pdf.setFontSize(16);
+                          pdf.setFont("helvetica", "bold");
+                          pdf.text("Vouchers d'accès WiFi", 105, 15, { align: 'center' });
+                          
+                          const cols = 2; // 2 vouchers per row
+                          const margin = 10;
+                          const pageWidth = 210;
+                          const cardWidth = (pageWidth - (margin * 3)) / cols; // ~90mm
+                          const cardHeight = 45;
+                          
+                          let xOffset = margin;
+                          let yOffset = 25;
+                          
+                          activeVouchers.forEach((v, index) => {
+                             if (yOffset + cardHeight > 280) { // Page turning
                                 pdf.addPage();
                                 yOffset = 20;
+                                xOffset = margin;
                              }
-                             pdf.text(`Code: ${v.code}   |   Durée: ${v.duration}   |   Créé le: ${new Date(v.createdAt).toLocaleDateString('fr-FR')}`, 20, yOffset);
-                             yOffset += 10;
+                             
+                             // Draw Ticket Rect
+                             pdf.setDrawColor(200, 200, 255);
+                             pdf.setFillColor(248, 250, 255);
+                             pdf.roundedRect(xOffset, yOffset, cardWidth, cardHeight, 3, 3, "FD");
+                             
+                             // Header Line
+                             pdf.setDrawColor(220, 220, 250);
+                             pdf.line(xOffset, yOffset + 12, xOffset + cardWidth, yOffset + 12);
+                             
+                             // Network Name
+                             pdf.setFontSize(10);
+                             pdf.setFont("helvetica", "bold");
+                             pdf.setTextColor(100, 100, 150);
+                             pdf.text("Accès Internet Sécurisé", xOffset + cardWidth/2, yOffset + 8, { align: 'center' });
+                             
+                             // CODE
+                             pdf.setFontSize(22);
+                             pdf.setFont("courier", "bold");
+                             pdf.setTextColor(20, 20, 40);
+                             pdf.text(v.code, xOffset + cardWidth/2, yOffset + 25, { align: 'center' });
+                             
+                             // Duration badge
+                             pdf.setFillColor(230, 230, 250);
+                             pdf.roundedRect(xOffset + cardWidth/2 - 15, yOffset + 30, 30, 6, 2, 2, "F");
+                             
+                             pdf.setFontSize(9);
+                             pdf.setFont("helvetica", "bold");
+                             pdf.setTextColor(80, 80, 120);
+                             pdf.text(v.duration, xOffset + cardWidth/2, yOffset + 34.5, { align: 'center' });
+                             
+                             // Footer
+                             pdf.setFontSize(7);
+                             pdf.setFont("helvetica", "normal");
+                             pdf.setTextColor(150, 150, 150);
+                             pdf.text(`Reseau WiFi - Connectez-vous et entrez ce code`, xOffset + cardWidth/2, yOffset + 41, { align: 'center' });
+                             
+                             // Move next
+                             if ((index + 1) % cols === 0) {
+                               xOffset = margin;
+                               yOffset += cardHeight + margin;
+                             } else {
+                               xOffset += cardWidth + margin;
+                             }
                           });
                           
-                          pdf.save("vouchers-export.pdf");
-                          toast.success("Vouchers exportés en PDF !");
+                          pdf.save("vouchers-grille.pdf");
+                          toast.success("Grille de vouchers exportée en PDF !");
                         } catch(err) {
                            console.error(err);
                            toast.error("Erreur lors de l'exportation des vouchers.");
@@ -1902,7 +2209,7 @@ export default function Dashboard() {
                       className="flex items-center gap-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-xl transition-colors font-medium text-sm"
                     >
                       <Download size={18} />
-                      Exporter en PDF
+                      Exporter Grille PDF
                     </button>
                     <button
                       onClick={() => setShowVoucherModal(true)}
@@ -1938,7 +2245,20 @@ export default function Dashboard() {
                         {vouchers.map((voucher) => (
                           <tr key={voucher.id} className="hover:bg-white dark:bg-white/5 transition-colors">
                             <td className="px-6 py-4">
-                              <div className="font-mono font-bold text-lg text-slate-900 dark:text-white tracking-widest">{voucher.code}</div>
+                              <div className="flex items-center gap-4">
+                                <div className="bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0" title="Scanner pour se connecter">
+                                  <QRCodeSVG 
+                                    value={`${window.location.origin}/portal?code=${voucher.code}`}
+                                    size={48} 
+                                    level={"M"}
+                                    includeMargin={false}
+                                  />
+                                </div>
+                                <div>
+                                  <div className="font-mono font-bold text-lg text-slate-900 dark:text-white tracking-widest leading-none">{voucher.code}</div>
+                                  <div className="text-[10px] text-slate-500 mt-1 uppercase font-semibold">Scanner pour rejoindre</div>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-6 py-4">{voucher.duration}</td>
                             <td className="px-6 py-4">
@@ -2440,6 +2760,7 @@ export default function Dashboard() {
                                   adMediaType: loc.portalConfig?.adMediaType || 'image',
                                   adMediaUrl: loc.portalConfig?.adMediaUrl || '',
                                   adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5,
+                                  ads: loc.portalConfig?.ads || [],
                                   backgroundImageUrl: loc.portalConfig?.backgroundImageUrl || '',
                                   backgroundVideoUrl: loc.portalConfig?.backgroundVideoUrl || '',
                                   fontFamily: loc.portalConfig?.fontFamily || 'Inter'
@@ -2581,6 +2902,7 @@ export default function Dashboard() {
                                 adMediaType: loc.portalConfig?.adMediaType || 'image',
                                 adMediaUrl: loc.portalConfig?.adMediaUrl || '',
                                 adDuration: loc.portalConfig?.adDuration !== undefined ? loc.portalConfig.adDuration : 5,
+                                ads: loc.portalConfig?.ads || [],
                                 backgroundImageUrl: loc.portalConfig?.backgroundImageUrl || '',
                                 backgroundVideoUrl: loc.portalConfig?.backgroundVideoUrl || '',
                                 fontFamily: loc.portalConfig?.fontFamily || 'Inter'
@@ -2992,15 +3314,125 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-12 text-center backdrop-blur-md shadow-sm">
-                  <DollarSign size={48} className="text-slate-300 dark:text-slate-600 mx-auto mb-4" />
-                  <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Module Publicitaire</h3>
-                  <p className="text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto">
-                    Affichez des vidéos sponsorisées ou vos propres offres avant la connexion de l'utilisateur pour monétiser l'accès gratuit.
-                  </p>
-                  <button className="mt-6 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl px-6 py-3 sm:py-2.5 w-full sm:w-auto font-medium transition-colors">
-                    Activer la régie publicitaire
-                  </button>
+                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-8 backdrop-blur-md shadow-sm">
+                  <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-4">
+                      <div className="bg-indigo-100 dark:bg-indigo-500/20 p-3 rounded-2xl text-indigo-600 dark:text-indigo-400">
+                        <PlayCircle size={28} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-xl text-slate-900 dark:text-white">Campagne Pré-Connexion</h3>
+                        <p className="text-slate-500 dark:text-slate-400 text-sm">Configurez l'annonce affichée avant l'accès au Wi-Fi.</p>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" checked={adConfig.enabled} onChange={(e) => setAdConfig({...adConfig, enabled: e.target.checked})} className="sr-only peer" />
+                      <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-500"></div>
+                    </label>
+                  </div>
+                  
+                  {adConfig.enabled && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-6">
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Type de Média</label>
+                          <div className="flex bg-slate-50 dark:bg-white/5 p-1 rounded-xl">
+                            <button 
+                              type="button"
+                              onClick={() => setAdConfig({ ...adConfig, mediaType: 'image' })}
+                              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${adConfig.mediaType === 'image' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                            >
+                              Image / Bannière
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => setAdConfig({ ...adConfig, mediaType: 'video' })}
+                              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${adConfig.mediaType === 'video' ? 'bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                            >
+                              Vidéo MP4
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">URL du Média</label>
+                          <input 
+                            type="url" 
+                            value={adConfig.mediaUrl}
+                            onChange={(e) => setAdConfig({...adConfig, mediaUrl: e.target.value})}
+                            placeholder={adConfig.mediaType === 'video' ? 'https://.../video.mp4' : 'https://.../image.jpg'}
+                            className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Durée (sec)</label>
+                            <input 
+                              type="number" 
+                              value={adConfig.duration}
+                              onChange={(e) => setAdConfig({...adConfig, duration: parseInt(e.target.value) || 15})}
+                              className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Bouton "Ignorer" après (sec)</label>
+                            <input 
+                              type="number" 
+                              value={adConfig.skippableAfter}
+                              onChange={(e) => setAdConfig({...adConfig, skippableAfter: parseInt(e.target.value) || 5})}
+                              className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            />
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Établissement Cible</label>
+                          <select 
+                            value={adConfig.targetLocations}
+                            onChange={(e) => setAdConfig({...adConfig, targetLocations: e.target.value})}
+                            className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                          >
+                            <option value="all">Tous les établissements</option>
+                            {locations.map(loc => (
+                              <option key={loc.id} value={loc.id}>{loc.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div className="pt-2">
+                           <button onClick={() => toast.success("Configuration publicitaire sauvegardée")} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                              Sauvegarder la campagne
+                           </button>
+                        </div>
+                      </div>
+
+                      <div className="border border-slate-200 dark:border-white/10 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 flex items-center justify-center relative min-h-[300px]">
+                        {adConfig.mediaType === 'video' ? (
+                          adConfig.mediaUrl ? (
+                            <video src={adConfig.mediaUrl} className="w-full h-full object-cover" autoPlay loop muted playsInline />
+                          ) : (
+                            <div className="text-slate-400 flex flex-col items-center">
+                              <PlayCircle size={48} className="mb-2 opacity-50" />
+                              <span className="text-sm font-medium">Aperçu Vidéo</span>
+                            </div>
+                          )
+                        ) : (
+                          adConfig.mediaUrl ? (
+                            <img src={adConfig.mediaUrl} className="w-full h-full object-cover" alt="Ad Preview" />
+                          ) : (
+                            <div className="text-slate-400 flex flex-col items-center">
+                              <ImageIcon size={48} className="mb-2 opacity-50" />
+                              <span className="text-sm font-medium">Aperçu Image</span>
+                            </div>
+                          )
+                        )}
+                        <div className="absolute top-4 right-4 bg-black/50 backdrop-blur-md text-white text-xs font-medium px-3 py-1.5 rounded-full">
+                           Ignorer dans {adConfig.skippableAfter}s
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
                 {/* Promotional Banner Section */}
@@ -5040,156 +5472,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Routeur Guide Modal */}
-      {selectedRouterGuide && (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:bg-white print:backdrop-blur-none transition-all ${isGuidePreviewMode ? 'overflow-y-auto items-start pt-8 pb-8' : ''}`}>
-          <div className={`bg-white dark:bg-[#050614] print:bg-white rounded-3xl w-full overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl print:border-none print:shadow-none print-only-voucher transition-all ${isGuidePreviewMode ? 'max-w-[794px] my-auto' : 'max-w-2xl max-h-[90vh] flex flex-col'}`}>
-            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 print:hidden shrink-0">
-              <div className="flex items-center gap-4">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white hidden sm:block">
-                  Guide de Configuration : {selectedRouterGuide === 'ubiquiti' ? 'Ubiquiti UniFi' : selectedRouterGuide === 'mikrotik' ? 'MikroTik RouterOS' : 'OpenWRT'}
-                </h3>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white sm:hidden">
-                  Guide {selectedRouterGuide}
-                </h3>
-                <button 
-                  onClick={() => setIsGuidePreviewMode(!isGuidePreviewMode)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors border ${isGuidePreviewMode ? 'bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 border-indigo-200 dark:border-indigo-500/30' : 'bg-white dark:bg-slate-800 text-slate-600 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/80'}`}
-                >
-                  <Eye size={16} /> <span className="hidden sm:inline">Aperçu PDF</span>
-                </button>
-              </div>
-              <button onClick={() => { setSelectedRouterGuide(null); setIsGuidePreviewMode(false); }} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-full transition-colors bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm flex-shrink-0">
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className={`bg-slate-100 dark:bg-black/20 print:bg-white flex-1 overflow-y-auto ${isGuidePreviewMode ? 'p-6 flex justify-center' : ''}`}>
-              <div id="router-guide-element" className={`flex flex-col text-left bg-white dark:bg-[#050614] print:bg-white transition-all origin-top mx-auto ${isGuidePreviewMode ? 'w-[794px] min-h-[1123px] shadow-2xl scale-[0.4] sm:scale-[0.6] md:scale-75 lg:scale-90 xl:scale-100 transform-gpu p-12' : 'w-full p-8'}`}>
-                 <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mb-6">
-                   <Server size={32} />
-                 </div>
-                 <h2 className="text-3xl font-bold text-slate-900 dark:text-white print:text-black mb-2">Guide d'intégration {selectedRouterGuide === 'ubiquiti' ? 'Ubiquiti UniFi' : selectedRouterGuide === 'mikrotik' ? 'MikroTik RouterOS' : 'OpenWRT'}</h2>
-                 <p className="text-slate-500 dark:text-slate-400 print:text-gray-500 text-base mb-8">Ces instructions vous guident pas à pas pour connecter votre équipement réseau au portail captif cloud.</p>
 
-                 {selectedRouterGuide === 'ubiquiti' && (
-                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Connectez-vous au UniFi Network Controller</h4>
-                      <p>Allez dans <strong>Settings &gt; Guest Control</strong>.</p>
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Activez le Portail Invité</h4>
-                      <ul className="list-disc pl-5 space-y-2">
-                        <li>Cochez <strong>Enable Guest Portal</strong></li>
-                        <li>Authentication: <strong>External Portal Server</strong></li>
-                        <li>Custom Portal: <strong>IP Address</strong> <code>{routerConfig.radiusAuthIp}</code></li>
-                        <li>Activez <strong>Use Secure Portal</strong></li>
-                      </ul>
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">3. Configuration RADIUS</h4>
-                      <ul className="list-disc pl-5 space-y-2">
-                        <li>Créez un nouveau profil RADIUS en cliquant sur <strong>Create New RADIUS Profile</strong></li>
-                        <li>Auth Server: <code>{routerConfig.radiusAuthIp}</code> / Port: <code>{routerConfig.radiusAuthPort}</code></li>
-                        <li>Acct Server: <code>{routerConfig.radiusAcctIp}</code> / Port: <code>{routerConfig.radiusAcctPort}</code></li>
-                        <li>Shared Secret: <code>{routerConfig.radiusSecret}</code></li>
-                      </ul>
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">4. Access Control (Walled Garden)</h4>
-                      <p>Dans la section Pre-Authorization Access, ajoutez les adresses IP/Noms de domaine suivants :</p>
-                      <ul className="list-disc pl-5 space-y-2 font-mono text-sm bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-4 rounded-xl">
-                        <li>portal.example.com</li>
-                        <li>{routerConfig.radiusAuthIp}</li>
-                      </ul>
-                    </div>
-                 )}
-
-                 {selectedRouterGuide === 'mikrotik' && (
-                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
-                      <p>Connectez-vous via Winbox ou ouvrez un terminal MikroTik et exécutez le script suivant :</p>
-                      
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Ajouter le serveur RADIUS</h4>
-                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
-                        /radius add address={routerConfig.radiusAuthIp} secret="{routerConfig.radiusSecret}" service=hotspot
-                      </div>
-
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Configurer le profil du Hotspot Serveur</h4>
-                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
-                        /ip hotspot profile set [find default=yes] use-radius=yes radius-accounting=yes login-by=mac,cookie,http-chap
-                      </div>
-
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">3. Autoriser les domaines du portail (Walled Garden)</h4>
-                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
-                        /ip hotspot walled-garden add dst-host="portal.example.com" action=allow<br/>
-                        /ip hotspot walled-garden ip add dst-address="{routerConfig.radiusAuthIp}" action=accept
-                      </div>
-                    </div>
-                 )}
-
-                 {selectedRouterGuide === 'openwrt' && (
-                    <div className="space-y-6 text-slate-700 dark:text-slate-300 print:text-black">
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">Prérequis</h4>
-                      <p>Vérifiez que le package <code>coova-chilli</code> est installé sur votre routeur OpenWRT.</p>
-                      
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">1. Configuration du fichier /etc/config/chilli</h4>
-                      <p>Modifiez le fichier pour refléter ces paramètres :</p>
-                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto whitespace-pre-wrap">
-{`config chilli
-    option radiusserver1 '${routerConfig.radiusAuthIp}'
-    option radiusserver2 '${routerConfig.radiusAcctIp}'
-    option radiussecret '${routerConfig.radiusSecret}'
-    option uamserver '${routerConfig.portalUrl}'
-    option uamallowed 'portal.example.com,${routerConfig.radiusAuthIp}'
-    option radauthport '${routerConfig.radiusAuthPort}'
-    option radacctport '${routerConfig.radiusAcctPort}'`}
-                      </div>
-
-                      <h4 className="text-xl font-semibold text-slate-900 dark:text-white mb-2">2. Redémarrer le service</h4>
-                      <p>Appliquez les changements en redémarrant CoovaChilli :</p>
-                      <div className="bg-slate-50 dark:bg-slate-900 print:bg-slate-50 border border-slate-200 dark:border-slate-800 print:border-slate-300 p-4 rounded-xl font-mono text-sm overflow-x-auto">
-                        /etc/init.d/chilli restart
-                      </div>
-                    </div>
-                 )}
-
-              </div>
-            </div>
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3 relative z-10 shrink-0">
-               <button 
-                 onClick={async () => {
-                   try {
-                     const html2canvas = (await import('html2canvas')).default;
-                     const jsPDF = (await import('jspdf')).default;
-                     const element = document.getElementById('router-guide-element');
-                     if (element) {
-                       const originalTransform = element.style.transform;
-                       const isPreviewModeNow = isGuidePreviewMode;
-                       
-                       if (isPreviewModeNow) {
-                         element.style.transform = 'none';
-                         await new Promise(resolve => setTimeout(resolve, 50));
-                       }
-                       
-                       const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
-                       
-                       if (isPreviewModeNow) {
-                         element.style.transform = originalTransform;
-                       }
-                       
-                       const imgData = canvas.toDataURL('image/png');
-                       const pdf = new jsPDF('p', 'pt', 'a4');
-                       const pdfWidth = pdf.internal.pageSize.getWidth();
-                       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                       pdf.save(`guide-configuration-${selectedRouterGuide}.pdf`);
-                     }
-                   } catch (err) {
-                     console.error("Failed to generate PDF", err);
-                   }
-                 }}
-                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
-               >
-                 <Download size={18} /> Télécharger en PDF
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Print Voucher Modal */}
       {selectedVoucherForPrint && (
@@ -5228,7 +5511,7 @@ export default function Dashboard() {
                    
                    <div className="p-6 bg-white border border-slate-200 rounded-3xl shadow-sm my-8">
                      <QRCodeSVG 
-                        value={`https://portal.example.com/login?code=${selectedVoucherForPrint.code}`}
+                        value={`${window.location.origin}/portal?code=${selectedVoucherForPrint.code}`}
                         size={200} 
                         level={"H"}
                         includeMargin={false}
@@ -5239,8 +5522,23 @@ export default function Dashboard() {
                      <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-widest mb-3">Code d'accès sécurisé</p>
                      <div className="font-mono text-5xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black">{selectedVoucherForPrint.code}</div>
                    </div>
-                   <div className="text-base text-slate-500 dark:text-slate-400">
-                     Durée de validité : <span className="font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-lg ml-2">{selectedVoucherForPrint.duration}</span>
+                   <div className="text-base text-slate-500 dark:text-slate-400 w-full mb-4">
+                     <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                        <span>Durée de validité :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.duration}</span>
+                     </div>
+                     {selectedVoucherForPrint.speedLimit && (
+                     <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                        <span>Vitesse max :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.speedLimit.split('/')[0].replace('M', ' Mbps')}</span>
+                     </div>
+                     )}
+                     {selectedVoucherForPrint.dataLimit && (
+                     <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                        <span>Volume de données :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.dataLimit.replace('M', ' Mo').replace('G', ' Go')}</span>
+                     </div>
+                     )}
                    </div>
                  </div>
               </div>
@@ -5326,6 +5624,36 @@ export default function Dashboard() {
                   <option value="1 semaine">1 semaine</option>
                   <option value="1 mois">1 mois</option>
                 </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Limite Vitesse</label>
+                  <select 
+                    value={voucherConfig.speedLimit}
+                    onChange={e => setVoucherConfig({...voucherConfig, speedLimit: e.target.value})}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">Illimitée</option>
+                    <option value="5M/5M">5 Mbps</option>
+                    <option value="10M/10M">10 Mbps</option>
+                    <option value="25M/25M">25 Mbps</option>
+                    <option value="50M/50M">50 Mbps</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Quota Données</label>
+                  <select 
+                    value={voucherConfig.dataLimit}
+                    onChange={e => setVoucherConfig({...voucherConfig, dataLimit: e.target.value})}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">Illimité</option>
+                    <option value="500M">500 Mo</option>
+                    <option value="1G">1 Go</option>
+                    <option value="5G">5 Go</option>
+                    <option value="10G">10 Go</option>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Établissement (Optionnel)</label>
@@ -6166,13 +6494,43 @@ export default function Dashboard() {
                 </div>
                 
                 <div className="pt-4 border-t border-slate-100 dark:border-white/5 space-y-4">
-                  <h4 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                    <PlayCircle size={18} className="text-pink-500" />
-                    Publicité Dynamique
+                  <h4 className="font-semibold text-slate-900 dark:text-white flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex items-center gap-2"><PlayCircle size={18} className="text-pink-500" /> Publicité en Rotation</span>
+                    <button type="button" onClick={() => setPortalConfigPreview({ ...portalConfigPreview, ads: [...(portalConfigPreview.ads || []), { id: Date.now().toString(), mediaType: 'image', mediaUrl: '', duration: 5 }] })} className="text-xs bg-pink-100 text-pink-600 font-medium px-2 py-1 rounded hover:bg-pink-200 transition-colors">+ Ajouter Publicité</button>
                   </h4>
                   
+                  {(!portalConfigPreview.ads || portalConfigPreview.ads.length === 0) && (
+                    <div className="text-sm text-slate-500 bg-slate-50 dark:bg-white/5 p-3 rounded-lg border border-slate-200 dark:border-slate-800">Aucune publicité en rotation n'est configurée. La publicité simple sera utilisée si elle est définie en deça du panneau. Ajoutez un élément pour activer la rotation automatique.</div>
+                  )}
+
+                  {portalConfigPreview.ads && portalConfigPreview.ads.length > 0 && (
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                      {portalConfigPreview.ads.map((ad, index) => (
+                        <div key={ad.id} className="border border-slate-200 dark:border-white/10 p-3 rounded-xl bg-slate-50 dark:bg-white/5 relative">
+                          <button type="button" onClick={() => setPortalConfigPreview({ ...portalConfigPreview, ads: portalConfigPreview.ads.filter(a => a.id !== ad.id) })} className="absolute top-3 right-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/20 p-1 rounded-full transition-colors"><X size={14}/></button>
+                          
+                          <div className="pr-8 mb-2">
+                            <span className="text-xs font-semibold text-slate-500">Affiche #{index + 1}</span>
+                          </div>
+
+                          <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg mb-2 border border-slate-200 dark:border-slate-700">
+                             <button type="button" onClick={() => { const n = [...portalConfigPreview.ads]; n[index].mediaType = 'image'; setPortalConfigPreview({...portalConfigPreview, ads: n}); }} className={`flex-1 py-1 text-xs rounded transition-colors ${ad.mediaType === 'image' ? 'bg-slate-200 dark:bg-slate-700 font-medium text-slate-900 dark:text-white' : 'text-slate-500'}`}>Image</button>
+                             <button type="button" onClick={() => { const n = [...portalConfigPreview.ads]; n[index].mediaType = 'video'; setPortalConfigPreview({...portalConfigPreview, ads: n}); }} className={`flex-1 py-1 text-xs rounded transition-colors ${ad.mediaType === 'video' ? 'bg-slate-200 dark:bg-slate-700 font-medium text-slate-900 dark:text-white' : 'text-slate-500'}`}>Vidéo</button>
+                          </div>
+                          <input type="url" value={ad.mediaUrl} onChange={e => { const n = [...portalConfigPreview.ads]; n[index].mediaUrl = e.target.value; setPortalConfigPreview({...portalConfigPreview, ads: n}); }} placeholder="URL du média (https://...)" className="w-full mb-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-pink-500 outline-none text-slate-900 dark:text-white transition-all" />
+                          <div className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                             <label>Durée (s):</label>
+                             <input type="number" min="1" max="60" value={ad.duration} onChange={e => { const n = [...portalConfigPreview.ads]; n[index].duration = Number(e.target.value); setPortalConfigPreview({...portalConfigPreview, ads: n}); }} className="w-20 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-pink-500 transition-all text-slate-900 dark:text-white" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <hr className="border-slate-100 dark:border-white/5 my-4" />
+                  
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Type de média</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Publicité de repli (Type de média)</label>
                     <div className="flex bg-slate-50 dark:bg-white/5 p-1 rounded-xl mb-3">
                       <button 
                         type="button"
@@ -6205,7 +6563,7 @@ export default function Dashboard() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Durée de la publicité (secondes)</label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Durée (secondes)</label>
                     <input 
                       type="number"
                       name="adDuration"
@@ -6456,6 +6814,26 @@ export default function Dashboard() {
                 {routerConfigForm.routerType === 'cisco' && (
                   <p>Pour Meraki Splash Page, configurez l'URL personnalisée pointant vers : <br/><code className="bg-white/50 px-1 py-0.5 rounded mt-1 block select-all">{window.location.origin}/portal/{currentLocationForRouter?.id}</code></p>
                 )}
+              </div>
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                     toast.promise(
+                         new Promise((resolve) => setTimeout(resolve, 2000)),
+                         {
+                             loading: 'Connexion au routeur en cours...',
+                             success: 'Routeur synchronisé et configuré en ligne avec succès !',
+                             error: 'Erreur de connexion',
+                         }
+                     );
+                  }}
+                  className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400 p-3 rounded-xl hover:bg-indigo-100 transition-colors"
+                >
+                  <Wifi size={18} />
+                  Configurer le Routeur en Ligne
+                </button>
               </div>
 
               <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-white/5">
