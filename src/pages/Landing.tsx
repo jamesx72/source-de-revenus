@@ -45,15 +45,15 @@ export default function Landing() {
               <span className="font-bold text-xl tracking-tight">WiFiCash</span>
             </div>
             <div className="hidden md:flex items-center gap-8 font-medium text-sm">
-              <a href="#features" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Fonctionnalités</a>
-              <a href="#pricing" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Tarifs</a>
+              <a href="#features" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">{t('landing.features')}</a>
+              <a href="#pricing" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">{t('landing.pricing')}</a>
               <a href="#demo" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Portail Captif</a>
               <div className="h-4 w-px bg-white/10"></div>
               <LanguageSwitcher />
               <ThemeToggle />
               <Link to="/portal?demo=true" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium">Démo Client</Link>
               <button onClick={handleDashboardClick} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 text-sm font-semibold rounded-full transition-colors">
-                {user ? 'Mon Espace' : 'Connexion gérant'}
+                {user ? t('landing.dashboard') : t('landing.login')}
               </button>
             </div>
           </div>

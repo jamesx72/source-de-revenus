@@ -3,7 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>WiFiCash</title>
+    <meta name="description" content="Monétisez la connexion Wi-Fi de vos établissements grâce à WiFiCash, la plateforme SaaS ultime pour cafés, hôtels et restaurants." />
+    <meta property="og:title" content="WiFiCash" />
+    <meta property="og:description" content="Monétisez la connexion Wi-Fi de vos établissements grâce à WiFiCash, la plateforme SaaS ultime pour cafés, hôtels et restaurants." />
+    <script>
+      (function() {
+        var isWsError = function(msg) {
+          if (!msg) return false;
+          var s = String(msg);
+          return s.includes('WebSocket') || s.includes('@vite/client') || s.includes('createWebSocketModuleRunnerTransport');
+        };
+        window.addEventListener('error', function(e) {
+          if (isWsError(e.message) || isWsError(e.error)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isWsError(e.reason)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

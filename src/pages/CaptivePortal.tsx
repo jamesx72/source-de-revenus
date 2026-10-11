@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, X } from 'lucide-react';
+import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, X, Download, FileText, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -10,6 +10,10 @@ import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/fires
 import { GoogleAuthProvider, FacebookAuthProvider, signInWithPopup } from 'firebase/auth';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { ReceiptModal } from '../components/ReceiptModal';
+import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
+import { WifiReceipt } from '../types';
+import { toast } from 'sonner';
 
 const stripePromise = loadStripe((import.meta as any).env.VITE_STRIPE_PUBLIC_KEY || '');
 
@@ -122,6 +126,9 @@ export default function CaptivePortal() {
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paymentCode, setPaymentCode] = useState<string>('');
+  const [purchasedPass, setPurchasedPass] = useState<{ name: string; price: number; duration: number } | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
   
   const [locationName, setLocationName] = useState('Le Café Central');
   const [portalConfig, setPortalConfig] = useState<any>(null);
@@ -292,6 +299,11 @@ export default function CaptivePortal() {
   const handleCheckout = async (basePriceAmount: number, passName: string, duration?: number, stripePriceId?: string) => {
     setIsProcessingPayment(true);
     if (duration) setSelectedDuration(duration);
+    setPurchasedPass({
+      name: passName,
+      price: basePriceAmount / 100,
+      duration: duration || 120,
+    });
 
     if (isDemo) {
       setTimeout(() => {
@@ -365,6 +377,17 @@ export default function CaptivePortal() {
        setTimeout(() => setIsApplyingPromo(false), 500); // Visual feedback
     }
   };
+
+  let sessionDuration = portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60;
+  if (wifiConfig) {
+    if (wifiConfig.timeLimit === 'unlimited') {
+      sessionDuration = 0;
+    } else if (wifiConfig.timeLimit === 'custom') {
+      sessionDuration = wifiConfig.customTimeLimit || 60;
+    } else if (wifiConfig.timeLimit) {
+      sessionDuration = parseInt(wifiConfig.timeLimit) || 60;
+    }
+  }
 
   const handleAuthSuccess = () => {
     setStep('success');
@@ -538,18 +561,6 @@ export default function CaptivePortal() {
   const fontFamily = portalConfig?.fontFamily || 'Inter';
   const backgroundImageUrl = portalConfig?.backgroundImageUrl || null;
   const backgroundVideoUrl = portalConfig?.backgroundVideoUrl || null;
-  
-  let sessionDuration = portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60;
-  if (wifiConfig) {
-    if (wifiConfig.timeLimit === 'unlimited') {
-      sessionDuration = 0; // 0 for unlimited usually? Wait, let's check what 0 means
-    } else if (wifiConfig.timeLimit === 'custom') {
-      sessionDuration = wifiConfig.customTimeLimit || 60;
-    } else if (wifiConfig.timeLimit) {
-      sessionDuration = parseInt(wifiConfig.timeLimit) || 60;
-    }
-  }
-
   const redirectUrl = portalConfig?.redirectUrl;
 
   const handleSuccessClickAndRedirect = () => {
@@ -592,6 +603,7 @@ export default function CaptivePortal() {
   }, [timeLeft, hasShownExpiryWarning]);
 
   const getDisplayPrice = (baseCents: number) => {
+    if (baseCents <= 0) return t('portal.free_badge');
     const symbol = paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€';
     if (!appliedPromo) return (baseCents / 100).toFixed(2) + " " + symbol;
     let newCents = baseCents;
@@ -600,9 +612,23 @@ export default function CaptivePortal() {
     } else if (appliedPromo.type === 'flat') {
        newCents = Math.max(0, baseCents - (appliedPromo.value * 100));
     }
+    if (newCents <= 0) return t('portal.free_badge');
     // Stripe minimum handled on backend but for display we can show 0 or exact. Backend caps at 50 cents.
     if (newCents > 0 && newCents < 50) newCents = 50; 
     return (newCents / 100).toFixed(2) + " " + symbol;
+  };
+
+  const formatPassDuration = (durationMinutes: number) => {
+    if (durationMinutes >= 1440) {
+      const days = Math.round(durationMinutes / 1440);
+      return `${days} ${days > 1 ? t('portal.days') : t('portal.day')}`;
+    }
+    if (durationMinutes >= 60) {
+      const hours = Math.floor(durationMinutes / 60);
+      const mins = durationMinutes % 60;
+      return `${hours}${t('portal.hour_short')}${mins > 0 ? ` ${mins}${t('portal.min_short')}` : ''}`;
+    }
+    return `${durationMinutes} ${t('portal.min_short')}`;
   };
 
   const formatTime = (seconds: number) => {
@@ -622,6 +648,23 @@ export default function CaptivePortal() {
       </div>
     );
   }
+
+  const currentReceipt: WifiReceipt = {
+    id: `REC-${(paymentCode || 'WIFI').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}-${Date.now().toString(36).toUpperCase().slice(-4)}`,
+    locationName: locationName || 'Le Café Central',
+    locationAddress: portalConfig?.address || 'Connexion Hotspot Wi-Fi',
+    wifiSsid: wifiConfig?.ssid || `${locationName} Wi-Fi`,
+    planName: purchasedPass?.name || (selectedDuration >= 1440 ? 'Pass 24 Heures' : 'Pass 2 Heures'),
+    durationMinutes: purchasedPass?.duration || selectedDuration || 120,
+    amount: purchasedPass?.price || (selectedDuration >= 1440 ? (paymentConfig.price24h || 5) : (paymentConfig.price1h || 2)),
+    currency: paymentConfig?.currency || 'EUR',
+    voucherCode: paymentCode || 'DEMO-CODE-1234',
+    discountCode: appliedPromo?.code,
+    discountAmount: appliedPromo ? (appliedPromo.type === 'flat' ? appliedPromo.value : ((purchasedPass?.price || 2.0) * (appliedPromo.value / 100))) : undefined,
+    paymentMethod: 'Carte Bancaire (Stripe)',
+    status: 'paid',
+    createdAt: new Date().toISOString(),
+  };
 
   const portalContent = (
     <div 
@@ -650,6 +693,11 @@ export default function CaptivePortal() {
       )}
 
       <div className="relative z-10 w-full h-full flex flex-col">
+        {/* Dynamic In-Portal Language Selector for travelers */}
+        <div className="absolute top-3 right-4 z-40">
+          <LanguageSwitcher variant="compact" />
+        </div>
+
         <AnimatePresence mode="wait">
           {step === 'home' && (
             <motion.div 
@@ -702,33 +750,59 @@ export default function CaptivePortal() {
                   {portalConfig?.allowExtension && (
                     <div className="w-full space-y-3 mb-6">
                       {(paymentConfig.passes && paymentConfig.passes.length > 0) ? (
-                        paymentConfig.passes.map((pass: any) => (
-                           <button 
-                             key={pass.id}
-                             onClick={() => handleCheckout(pass.price * 100, pass.name, pass.duration, pass.stripePriceId)}
-                             disabled={isProcessingPayment}
-                             className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
-                           >
-                            <div className="text-left">
-                               <p className="font-bold text-sm">{pass.name}</p>
-                               <p className="text-xs text-slate-500 opacity-80">Durée: {pass.duration >= 60 ? `${Math.floor(pass.duration / 60)}h ${pass.duration % 60 > 0 ? pass.duration % 60 + 'm' : ''}` : `${pass.duration} min`}</p>
-                            </div>
-                            <div className="font-bold flex items-center gap-2">
-                             {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">{(pass.price).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
-                             {getDisplayPrice(pass.price * 100)}
-                            </div>
-                           </button>
-                        ))
+                        paymentConfig.passes
+                          .filter((pass: any) => pass.isActive !== false)
+                          .map((pass: any) => {
+                            const isFree = pass.price === 0 || pass.isAdSupported;
+                            return (
+                              <button 
+                                key={pass.id}
+                                onClick={() => {
+                                  if (isFree) {
+                                    simulateAd();
+                                  } else {
+                                    handleCheckout(pass.price * 100, pass.name, pass.duration, pass.stripePriceId);
+                                  }
+                                }}
+                                disabled={isProcessingPayment}
+                                className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
+                              >
+                               <div className="text-left">
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-sm">{pass.name}</p>
+                                    {pass.badge && (
+                                      <span className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold px-1.5 py-0.5 rounded">
+                                        {pass.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 opacity-80 mt-0.5">
+                                    {t('portal.duration')}: {formatPassDuration(pass.duration)}
+                                    {pass.downloadSpeedLimit ? ` • ↓ ${pass.downloadSpeedLimit} Mbps` : ''}
+                                  </p>
+                                  {pass.description && (
+                                    <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{pass.description}</p>
+                                  )}
+                               </div>
+                               <div className="font-bold flex items-center gap-2">
+                                {appliedPromo && !isFree && <span className="text-sm line-through text-slate-400 font-normal">{(pass.price).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
+                                <span className={isFree ? "text-emerald-500 font-semibold" : ""}>
+                                  {getDisplayPrice(pass.price * 100)}
+                                </span>
+                               </div>
+                              </button>
+                            );
+                          })
                       ) : (
                         <>
                           <button 
-                            onClick={() => handleCheckout((paymentConfig.price1h || 2) * 100, "Premium 2 Heures", 120)}
+                            onClick={() => handleCheckout((paymentConfig.price1h || 2) * 100, t('portal.pass_2h_title'), 120)}
                             disabled={isProcessingPayment}
                             className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
                           >
                            <div className="text-left">
-                              <p className="font-bold text-sm">Premium 2 Heures</p>
-                              <p className="text-xs text-slate-500 opacity-80">Haut débit sans publicité</p>
+                              <p className="font-bold text-sm">{t('portal.pass_2h_title')}</p>
+                              <p className="text-xs text-slate-500 opacity-80">{t('portal.pass_2h_desc')}</p>
                            </div>
                            <div className="font-bold flex items-center gap-2">
                             {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">{(paymentConfig.price1h || 2).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
@@ -736,13 +810,13 @@ export default function CaptivePortal() {
                            </div>
                           </button>
                           <button 
-                            onClick={() => handleCheckout((paymentConfig.price24h || 5) * 100, "Pass Journée", 1440)}
+                            onClick={() => handleCheckout((paymentConfig.price24h || 5) * 100, t('portal.pass_24h_title'), 1440)}
                             disabled={isProcessingPayment}
                             className={`w-full flex items-center justify-between p-4 border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors backdrop-blur-sm ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-xl'}`}
                           >
                            <div className="text-left">
-                              <p className="font-bold text-sm">Pass Journée</p>
-                              <p className="text-xs text-slate-500 opacity-80">Accès illimité 24h</p>
+                              <p className="font-bold text-sm">{t('portal.pass_24h_title')}</p>
+                              <p className="text-xs text-slate-500 opacity-80">{t('portal.pass_24h_desc')}</p>
                            </div>
                            <div className="font-bold flex items-center gap-2">
                             {appliedPromo && <span className="text-sm line-through text-slate-400 font-normal">{(paymentConfig.price24h || 5).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>}
@@ -758,7 +832,7 @@ export default function CaptivePortal() {
                     <div className="w-full mb-6">
                       {appliedPromo ? (
                         <div className="mb-4 p-3 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 text-green-700 dark:text-green-400 rounded-xl flex items-center justify-between text-sm">
-                          <span className="font-medium">Code appliqué : {appliedPromo.code} (-{appliedPromo.type === 'percentage' ? `${appliedPromo.value}%` : `${appliedPromo.value}€`})</span>
+                          <span className="font-medium">{t('portal.applied_code')} : {appliedPromo.code} (-{appliedPromo.type === 'percentage' ? `${appliedPromo.value}%` : `${appliedPromo.value}€`})</span>
                           <button onClick={() => setAppliedPromo(null)} className="opacity-70 hover:opacity-100 flex items-center justify-center p-1">
                             <X size={16} />
                           </button>
@@ -769,7 +843,7 @@ export default function CaptivePortal() {
                             type="text"
                             value={promoCodeInput}
                             onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
-                            placeholder="Code promo ?"
+                            placeholder={t('portal.promo_code')}
                             className="flex-1 px-4 py-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-mono"
                           />
                           <button 
@@ -777,7 +851,7 @@ export default function CaptivePortal() {
                             disabled={isApplyingPromo || !promoCodeInput.trim()}
                             className="px-4 py-2 bg-slate-900 dark:bg-indigo-600 text-white rounded-xl font-medium text-sm disabled:opacity-50 transition-colors"
                           >
-                            {isApplyingPromo ? '...' : 'Appliquer'}
+                            {isApplyingPromo ? '...' : t('portal.apply')}
                           </button>
                         </div>
                       )}
@@ -791,7 +865,7 @@ export default function CaptivePortal() {
                   <div className="w-full">
                     <div className="relative flex items-center py-4">
                       <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
-                      <span className="flex-shrink-0 mx-4 text-slate-500 text-xs text-opacity-50">Ou se connecter avec</span>
+                      <span className="flex-shrink-0 mx-4 text-slate-500 text-xs text-opacity-50">{t('portal.or_connect_with')}</span>
                       <div className="flex-grow border-t border-slate-200 dark:border-white/10"></div>
                     </div>
                     <div className="flex gap-4 max-w-[200px] mx-auto">
@@ -813,7 +887,7 @@ export default function CaptivePortal() {
                       {termsOfService ? (
                           <p className="whitespace-pre-line">{termsOfService}</p>
                       ) : (
-                          <p>En vous connectant, vous acceptez les conditions générales d'utilisation de ce réseau.</p>
+                          <p>{t('portal.terms_default')}</p>
                       )}
                   </div>
                 </div>
@@ -830,7 +904,7 @@ export default function CaptivePortal() {
               >
                 <div className="flex-1 relative flex items-center justify-center bg-black">
                   <div className="absolute top-6 right-6 text-xs font-bold text-white bg-black/60 border border-white/20 px-3 py-1.5 rounded-full z-20 backdrop-blur-md">
-                    Publicité - {Math.ceil(((activeAd?.duration || portalConfig?.adDuration || 5) * (1 - adProgress / 100)))}s
+                    {t('portal.ad_badge')} - {Math.ceil(((activeAd?.duration || portalConfig?.adDuration || 5) * (1 - adProgress / 100)))}s
                   </div>
                   
                   {(activeAd?.mediaType || portalConfig?.adMediaType) === 'video' ? (
@@ -857,14 +931,14 @@ export default function CaptivePortal() {
                       <div className="w-20 h-20 bg-indigo-500 rounded-full mx-auto mb-6 flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.6)] relative z-10">
                         <Smartphone size={32} className="text-white" />
                       </div>
-                      <h2 className="text-2xl font-bold mb-2 relative z-10">Espace Publicitaire</h2>
-                      <p className="text-indigo-200 relative z-10 font-medium">Votre annonce ici</p>
+                      <h2 className="text-2xl font-bold mb-2 relative z-10">{t('portal.ad_space')}</h2>
+                      <p className="text-indigo-200 relative z-10 font-medium">{t('portal.your_ad_here')}</p>
                     </div>
                   )}
                   
                   {/* Progress Bar */}
                   <div className="absolute bottom-12 left-8 right-8 z-20">
-                    <p className="text-sm font-medium text-center mb-3 text-white/90 drop-shadow-md">Connexion en cours...</p>
+                    <p className="text-sm font-medium text-center mb-3 text-white/90 drop-shadow-md">{t('portal.connecting')}</p>
                     <div className="h-2 w-full bg-black/40 border border-white/10 rounded-full overflow-hidden backdrop-blur-sm shadow-inner relative">
                       <motion.div 
                         className="absolute top-0 left-0 bottom-0 bg-indigo-500 rounded-full shadow-[0_0_15px_rgba(99,102,241,1)]"
@@ -889,19 +963,54 @@ export default function CaptivePortal() {
                 <div className="w-24 h-24 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mt-4 mb-6 relative z-10 border border-indigo-500/30 shrink-0">
                   <CheckCircle2 size={48} />
                 </div>
-                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">Paiement Réussi</h2>
-                <p className="text-slate-600 dark:text-slate-400 font-medium px-4 relative z-10 text-sm">Merci pour votre achat ! Voici votre code de connexion.</p>
+                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2 relative z-10">{t('portal.payment_success_title')}</h2>
+                <p className="text-slate-600 dark:text-slate-400 font-medium px-4 relative z-10 text-sm">{t('portal.payment_success_sub')}</p>
 
                 <div className="mt-4 mb-4 flex items-center justify-center gap-2 relative z-10">
                   <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-                  <span className="text-sm font-semibold text-green-600 dark:text-green-400">Accès Internet Activé</span>
+                  <span className="text-sm font-semibold text-green-600 dark:text-green-400">{t('portal.internet_active')}</span>
                 </div>
                 
-                <div className="mt-4 mb-6 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
-                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-2">Code d'accès Wi-Fi</p>
-                  <div className="bg-slate-100 dark:bg-black/20 p-4 rounded-xl border border-slate-200 dark:border-white/5 font-mono text-3xl font-bold text-indigo-500 tracking-widest">
+                <div className="mt-4 mb-5 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 font-medium mb-2">{t('portal.wifi_access_code')}</p>
+                  <div className="bg-slate-100 dark:bg-black/20 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 font-mono text-2xl sm:text-3xl font-bold text-indigo-500 tracking-widest">
                     {paymentCode}
                   </div>
+                </div>
+
+                {/* Printable PDF Receipt Actions */}
+                <div className="w-full space-y-2 mb-6 relative z-10">
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        try {
+                          setIsDownloadingReceipt(true);
+                          downloadReceiptPdf(currentReceipt);
+                          toast.success(t('portal.receipt_downloaded'));
+                        } catch (err) {
+                          toast.error(t('portal.receipt_error'));
+                        } finally {
+                          setTimeout(() => setIsDownloadingReceipt(false), 600);
+                        }
+                      }}
+                      disabled={isDownloadingReceipt}
+                      className="flex-1 py-3 px-3 bg-white dark:bg-white/10 hover:bg-slate-50 dark:hover:bg-white/15 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-white rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 disabled:opacity-50"
+                    >
+                      <Download size={16} className="text-indigo-500" />
+                      <span>{isDownloadingReceipt ? t('portal.generating_receipt') : t('portal.download_receipt')}</span>
+                    </button>
+                    <button 
+                      onClick={() => setShowReceiptModal(true)}
+                      className="py-3 px-3.5 bg-indigo-50 dark:bg-indigo-500/20 hover:bg-indigo-100 dark:hover:bg-indigo-500/30 border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                      title="Voir le reçu détaillé et imprimer"
+                    >
+                      <FileText size={16} />
+                      <span>{t('portal.preview_receipt')}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {t('portal.receipt_note')}
+                  </p>
                 </div>
                 
                 <button 
@@ -909,7 +1018,7 @@ export default function CaptivePortal() {
                   style={{ backgroundColor: activeThemeColor }}
                   className="w-full py-4 text-white rounded-xl font-bold text-lg transition-transform shadow-lg shadow-indigo-500/20 mt-auto hover:opacity-90 active:scale-95"
                 >
-                  Se connecter maintenant
+                  {t('portal.connect_now')}
                 </button>
               </motion.div>
             )}
@@ -951,7 +1060,7 @@ export default function CaptivePortal() {
                     style={{ backgroundColor: activeThemeColor }}
                     className="w-full py-3 text-white rounded-xl font-medium transition-colors shadow-lg shadow-indigo-500/20 mb-6 relative z-10 hover:opacity-90 active:scale-95"
                   >
-                    Continuer vers le site
+                    {t('portal.continue_to_site')}
                   </button>
                 )}
 
@@ -966,14 +1075,14 @@ export default function CaptivePortal() {
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-2 font-bold text-lg">
                            <AlertCircle size={20} />
-                           Session bientôt expirée
+                           {t('portal.session_expiry_title')}
                         </div>
                         <button onClick={() => setShowExpiryWarning(false)} className="p-1 hover:bg-black/10 rounded-lg transition-colors">
                           <X size={18} />
                         </button>
                       </div>
                       <p className="text-sm font-medium text-amber-50 leading-snug text-left">
-                        Votre session Wi-Fi expire dans moins de 5 minutes.
+                        {t('portal.session_expiry_msg')}
                       </p>
                       
                       <button 
@@ -984,7 +1093,7 @@ export default function CaptivePortal() {
                         disabled={isProcessingPayment}
                         className="mt-2 w-full py-3 bg-white text-amber-600 font-bold rounded-xl shadow-sm hover:bg-amber-50 transition-colors flex items-center justify-center gap-2 active:scale-95"
                       >
-                        <span>Prolonger la session (+2h)</span>
+                        <span>{t('portal.extend_session')}</span>
                         {isProcessingPayment && <div className="w-4 h-4 border-2 border-amber-600/30 border-t-amber-600 rounded-full animate-spin"></div>}
                       </button>
                     </motion.div>
@@ -993,7 +1102,7 @@ export default function CaptivePortal() {
 
                 {!feedbackSubmitted ? (
                   <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-5 rounded-2xl shadow-sm w-full relative z-10 backdrop-blur-md mb-6 mt-auto">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Comment évaluez-vous votre expérience ?</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">{t('portal.rate_experience')}</p>
                     <div className="flex justify-center gap-2 mb-4">
                       {[1, 2, 3, 4, 5].map((star) => (
                         <button
@@ -1010,7 +1119,7 @@ export default function CaptivePortal() {
                       disabled={feedbackRating === 0}
                       className="w-full py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-slate-300 disabled:dark:bg-white/10 dark:disabled:text-white/30 text-white rounded-xl text-sm font-medium transition-colors"
                     >
-                      Envoyer
+                      {t('portal.send')}
                     </button>
                   </div>
                 ) : (
@@ -1019,13 +1128,13 @@ export default function CaptivePortal() {
                     animate={{ opacity: 1, y: 0 }}
                     className="bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 p-5 rounded-2xl w-full relative z-10 mb-6"
                   >
-                    <p className="text-sm font-medium text-indigo-600 dark:text-indigo-300 mb-1">Merci pour votre retour ! 🎉</p>
-                    <p className="text-xs text-indigo-500 dark:text-indigo-400 opacity-80">Votre avis nous aide à nous améliorer.</p>
+                    <p className="text-sm font-medium text-indigo-600 dark:text-indigo-300 mb-1">{t('portal.thank_you_feedback')}</p>
+                    <p className="text-xs text-indigo-500 dark:text-indigo-400 opacity-80">{t('portal.feedback_help')}</p>
                   </motion.div>
                 )}
 
                 <p className="mt-auto text-xs text-slate-500 flex items-center justify-center gap-1 relative z-10 pb-4">
-                  <ShieldCheck size={14}/> Connexion sécurisée par WiFiCash
+                  <ShieldCheck size={14}/> {t('portal.sec_conn')}
                 </p>
               </motion.div>
             )}
@@ -1045,7 +1154,7 @@ export default function CaptivePortal() {
                    >
                      <ChevronLeft size={20} />
                    </button>
-                   <h2 className="text-xl font-bold text-slate-900 dark:text-white">Paiement</h2>
+                   <h2 className="text-xl font-bold text-slate-900 dark:text-white">{t('portal.payment_title')}</h2>
                 </div>
 
                 <div className="flex-1 w-full overflow-y-auto" id="checkout">
@@ -1074,6 +1183,7 @@ export default function CaptivePortal() {
     return (
       <div className="w-full h-full m-0 p-0 overflow-hidden font-sans text-slate-900 dark:text-white relative bg-transparent">
         {portalContent}
+        <ReceiptModal isOpen={showReceiptModal} onClose={() => setShowReceiptModal(false)} receipt={currentReceipt} />
       </div>
     );
   }
@@ -1089,7 +1199,7 @@ export default function CaptivePortal() {
       <div className="absolute top-6 left-6 flex items-center gap-4 z-10">
         <Link to="/" className="flex items-center gap-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-medium transition-colors">
           <ChevronLeft size={20} />
-          Retour au site
+          {t('portal.back_to_site')}
         </Link>
         <ThemeToggle />
         <LanguageSwitcher />
@@ -1101,6 +1211,8 @@ export default function CaptivePortal() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-50 dark:bg-[#050614] rounded-b-2xl z-50 shadow-inner"></div>
         {portalContent}
       </div>
+
+      <ReceiptModal isOpen={showReceiptModal} onClose={() => setShowReceiptModal(false)} receipt={currentReceipt} />
     </div>
   );
 }

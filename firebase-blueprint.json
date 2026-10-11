@@ -122,6 +122,15 @@
             "macBypassGracePeriod": { "type": "number", "nullable": true }
           }
         },
+        "paymentConfig": {
+          "type": "object",
+          "properties": {
+            "currency": { "type": "string" },
+            "price1h": { "type": "number" },
+            "price24h": { "type": "number" },
+            "passes": { "type": "array" }
+          }
+        },
         "createdAt": { "type": "timestamp" },
         "updatedAt": { "type": "timestamp" }
       },

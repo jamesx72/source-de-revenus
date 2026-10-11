@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon, Router, RefreshCw, PlayCircle, Copy } from 'lucide-react';
+import { Menu, WifiOff, Tag, Wifi, User, Users, DollarSign, Activity, Settings, Bell, Search, LayoutDashboard, Plus, MoreHorizontal, ArrowUpRight, ArrowRight, ArrowDown, ArrowUp, Smartphone, Gift, Coffee, Sparkles, Star, Award, Edit3, ShieldCheck, X, CheckCircle2, LogOut, ChevronRight, ChevronLeft, QrCode, Download, MessageSquare, Globe, Mail, Megaphone, Clock, Calendar, Palette, MapPin, Trash2, Key, BellRing, Moon, Sun, AlertCircle, Ticket, Server, HeartPulse, XCircle, CreditCard, Upload, Eye, EyeOff, PowerOff, Image as ImageIcon, Router, RefreshCw, PlayCircle, Copy, FileText, Printer } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy } from '@dnd-kit/sortable';
 import { SortableWidget } from '../components/SortableWidget';
 import { LocationsMapView } from '../components/LocationsMap';
 import { DashboardAnalytics } from '../components/DashboardAnalytics';
+import { ReceiptModal } from '../components/ReceiptModal';
+import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
+import { WifiReceipt } from '../types';
+import WifiPlansConfig from '../components/WifiPlansConfig';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -52,6 +56,7 @@ export default function Dashboard() {
   const t = TRANSLATIONS[language];
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [globalLocationId, setGlobalLocationId] = useState<string>('all');
+  const [selectedWifiLocationId, setSelectedWifiLocationId] = useState<string>('');
   const [ratioConfig, setRatioConfig] = useState({ hours: 1, points: 10 });
   const [wifiConfig, setWifiConfig] = useState({ isGlobalActive: true, timeLimit: 'unlimited', customTimeLimit: 120, downloadSpeed: 'unlimited', uploadSpeed: 'unlimited', autoRenew: false, autoRenewLimit: 1, macBypassEnabled: false, macBypassGracePeriod: 24 });
   const [portalConfig, setPortalConfig] = useState<{ themeColor: string; logoUrl: string | null }>({ themeColor: '#6366f1', logoUrl: null });
@@ -106,6 +111,8 @@ export default function Dashboard() {
   const [locations, setLocations] = useState<any[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [selectedTransactionForReceipt, setSelectedTransactionForReceipt] = useState<WifiReceipt | null>(null);
+  const [showDashboardReceiptModal, setShowDashboardReceiptModal] = useState(false);
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [platformSubscription, setPlatformSubscription] = useState<any>(null);
   const [showVoucherModal, setShowVoucherModal] = useState(false);
@@ -2791,19 +2798,11 @@ export default function Dashboard() {
                             </button>
                             <button
                               onClick={() => {
-                                setCurrentLocationForPricing(loc);
-                                setPricingConfigPreview({
-                                  currency: loc.paymentConfig?.currency || 'eur',
-                                  passes: loc.paymentConfig?.passes || [
-                                    { id: '1', name: 'Pass 1 Heure', price: loc.paymentConfig?.price1h || 2, duration: 60, stripePriceId: '' },
-                                    { id: '2', name: 'Pass 24 Heures', price: loc.paymentConfig?.price24h || 5, duration: 1440, stripePriceId: '' }
-                                  ]
-                                });
-                                setStripeProducts([]);
-                                setShowPricingModal(true);
+                                setSelectedWifiLocationId(loc.id);
+                                setActiveTab('wifi');
                               }}
                               className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/20 rounded-lg transition-colors"
-                              title="Gérer les tarifs"
+                              title="Gérer les forfaits et durées Wi-Fi"
                             >
                               <Tag size={18} />
                             </button>
@@ -2939,10 +2938,15 @@ export default function Dashboard() {
 
             {!isDataLoading && activeTab === 'wifi' && (
               <div className="space-y-8">
-                <div>
-                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Forfaits Wi-Fi</h2>
-                  <p className="text-slate-500 dark:text-slate-400">Gérez les offres d'accès à votre réseau.</p>
-                </div>
+                {/* Interface de configuration des durées et forfaits Wi-Fi personnalisés */}
+                <WifiPlansConfig
+                  locations={locations}
+                  selectedLocationId={selectedWifiLocationId || (globalLocationId !== 'all' ? globalLocationId : locations[0]?.id)}
+                  onLocationChange={(locId) => setSelectedWifiLocationId(locId)}
+                  onSaveSuccess={(updatedLoc) => {
+                    setLocations(prev => prev.map(l => l.id === updatedLoc.id ? { ...l, ...updatedLoc } : l));
+                  }}
+                />
 
                 {/* Global Wi-Fi Constraints Form */}
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 md:p-8 backdrop-blur-md shadow-sm">
@@ -3101,40 +3105,6 @@ export default function Dashboard() {
                       <CheckCircle2 size={18} />
                       Sauvegarder
                     </button>
-                  </div>
-                </div>
-
-                {/* Active Plans Duplicated here for context */}
-                <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl p-6 backdrop-blur-md shadow-sm">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Forfaits Actifs</h3>
-                    <button className="bg-indigo-500 hover:bg-indigo-600 text-white rounded-full p-2 transition-colors flex items-center gap-2 px-4">
-                      <Plus size={16} /> Créer un forfait
-                    </button>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    {[
-                      { name: 'Pass Gratuit (Pub)', duration: '30 min', price: '0 €', color: 'text-green-400' },
-                      { name: 'Pass Express', duration: '2 heures', price: '2 €', color: 'text-indigo-400' },
-                      { name: 'Daily Premium', duration: '24 heures', price: '5 €', color: 'text-purple-400' },
-                      { name: 'Nomad Week', duration: '7 jours', price: '15 €', color: 'text-orange-400' },
-                    ].map((plan, i) => (
-                      <div key={i} className="flex items-center justify-between border border-slate-100 dark:border-white/5 rounded-2xl p-4">
-                        <div>
-                          <h4 className="font-medium text-slate-900 dark:text-white">{plan.name}</h4>
-                          <p className="text-sm text-slate-500 mt-1">Limite: {plan.duration}</p>
-                        </div>
-                        <div className="flex items-center gap-6">
-                          <div className={`font-bold font-mono text-lg ${plan.color}`}>
-                            {plan.price}
-                          </div>
-                          <button className="text-slate-400 hover:text-slate-900 dark:hover:text-white">
-                            <MoreHorizontal size={20} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
 
@@ -3613,33 +3583,84 @@ export default function Dashboard() {
                           <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Établissement</th>
                           <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Montant</th>
                           <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider">Statut</th>
+                          <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wider text-right">Reçu PDF</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 dark:divide-white/10">
-                        {filteredTransactions.map((tx, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
-                            <td className="px-6 py-4">
-                              <span className="text-sm font-medium text-slate-900 dark:text-white">{new Date(tx.createdAt).toLocaleString('fr-FR')}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{tx.sessionId?.substring(0, 16) || tx.id}...</span>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
-                              {tx.locationId ? locations.find(l => l.id === tx.locationId)?.name || 'Inconnu' : 'Inconnu'}
-                            </td>
-                            <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
-                              €{Number(tx.amount || 0).toFixed(2)}
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${tx.status === 'paid' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
-                                {tx.status === 'paid' ? 'Réussi' : tx.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
+                        {filteredTransactions.map((tx, idx) => {
+                          const loc = locations.find(l => l.id === tx.locationId);
+                          const receiptObj: WifiReceipt = {
+                            id: tx.id ? (tx.id.startsWith('REC-') ? tx.id : `REC-${tx.id.substring(0, 8).toUpperCase()}`) : `REC-${idx + 1000}`,
+                            transactionId: tx.id || tx.sessionId,
+                            locationName: loc?.name || 'Mon Établissement',
+                            locationAddress: loc?.address || 'Connexion Wi-Fi Établissement',
+                            wifiSsid: loc?.wifiSsid || 'WiFi-Guest',
+                            planName: tx.planName || (tx.amount >= 5 ? 'Pass 24 Heures' : 'Pass 2 Heures'),
+                            durationMinutes: tx.duration || (tx.amount >= 5 ? 1440 : 120),
+                            amount: Number(tx.amount || 0),
+                            currency: tx.currency || 'EUR',
+                            voucherCode: tx.voucherCode || `WIFI-${(tx.id || Math.random().toString(36)).substring(0, 6).toUpperCase()}`,
+                            customerEmail: tx.customerEmail || tx.email,
+                            customerName: tx.customerName,
+                            paymentMethod: 'Carte Bancaire / Stripe',
+                            status: tx.status === 'paid' ? 'paid' : 'pending',
+                            createdAt: tx.createdAt || new Date().toISOString(),
+                          };
+
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                              <td className="px-6 py-4">
+                                <span className="text-sm font-medium text-slate-900 dark:text-white">{new Date(tx.createdAt).toLocaleString('fr-FR')}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{tx.sessionId?.substring(0, 16) || tx.id}...</span>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
+                                {loc?.name || 'Inconnu'}
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
+                                €{Number(tx.amount || 0).toFixed(2)}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${tx.status === 'paid' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
+                                  {tx.status === 'paid' ? 'Réussi' : tx.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedTransactionForReceipt(receiptObj);
+                                      setShowDashboardReceiptModal(true);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-indigo-50 dark:bg-white/5 dark:hover:bg-indigo-500/20 text-slate-700 hover:text-indigo-600 dark:text-slate-200 dark:hover:text-indigo-400 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 border border-slate-200 dark:border-white/10 shadow-sm"
+                                    title="Aperçu & Impression du reçu"
+                                  >
+                                    <FileText size={14} className="text-indigo-500" />
+                                    <span className="hidden sm:inline">Reçu</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      try {
+                                        downloadReceiptPdf(receiptObj);
+                                        toast.success('Reçu PDF officiel téléchargé avec succès !');
+                                      } catch (err) {
+                                        toast.error('Erreur lors de la génération du reçu PDF');
+                                      }
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 rounded-lg transition-colors border border-transparent hover:border-slate-200 dark:border-white/10"
+                                    title="Télécharger le fichier PDF"
+                                  >
+                                    <Download size={15} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                         {filteredTransactions.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
+                            <td colSpan={6} className="px-6 py-8 text-center text-slate-500 dark:text-slate-400 text-sm">
                               Aucune transaction pour le moment.
                             </td>
                           </tr>
@@ -7076,6 +7097,13 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Printable Receipt Modal */}
+      <ReceiptModal
+        isOpen={showDashboardReceiptModal}
+        onClose={() => setShowDashboardReceiptModal(false)}
+        receipt={selectedTransactionForReceipt}
+      />
 
     </div>
   );
