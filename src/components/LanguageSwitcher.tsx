@@ -42,7 +42,7 @@ export function LanguageSwitcher({
 
   if (variant === 'compact') {
     return (
-      <div className={`inline-flex items-center gap-0.5 bg-slate-100/60 dark:bg-white/5 p-0.5 rounded-lg border border-slate-200/50 dark:border-white/10 ${className}`}>
+      <div className={`inline-flex items-center gap-1 bg-black/40 hover:bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/20 shadow-sm transition-colors ${className}`}>
         {AVAILABLE_LANGUAGES.map((lang) => {
           const isActive = language === lang.code;
           return (
@@ -50,13 +50,14 @@ export function LanguageSwitcher({
               key={lang.code}
               onClick={() => setLanguage(lang.code)}
               title={lang.label}
-              className={`px-1.5 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+              className={`px-2 py-0.5 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
                 isActive
-                  ? 'bg-indigo-500 text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-indigo-600 text-white shadow-sm scale-105'
+                  : 'text-white/80 hover:text-white hover:bg-white/10'
               }`}
             >
-              {lang.code.toUpperCase()}
+              <span className="text-[10px]">{lang.flag}</span>
+              <span>{lang.code.toUpperCase()}</span>
             </button>
           );
         })}

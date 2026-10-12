@@ -7,6 +7,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStr
 import { SortableWidget } from '../components/SortableWidget';
 import { LocationsMapView } from '../components/LocationsMap';
 import { DashboardAnalytics } from '../components/DashboardAnalytics';
+import { DashboardWidget } from '../components/DashboardWidget';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
 import { WifiReceipt } from '../types';
@@ -1520,55 +1521,14 @@ export default function Dashboard() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8 pb-4">
                   {widgetOrder.map(widgetId => {
                     if (widgetId === 'revenue') return (
-                      <SortableWidget key="revenue" id="revenue" className="lg:col-span-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 p-6 rounded-3xl backdrop-blur-md shadow-sm">
-                        <div className="flex items-center justify-between mb-6">
-                          <div className="flex items-center gap-2 cursor-grab active:cursor-grabbing">
-                            <MoreHorizontal className="text-slate-400 hidden sm:block" size={20} />
-                            <div>
-                              <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Évolution des Revenus</h3>
-                              <p className="text-sm text-slate-500 dark:text-slate-400">Abonnements Wi-Fi et Publicité</p>
-                            </div>
-                          </div>
-                          <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl">
-                            <button 
-                              onClick={() => setOverviewTimeframe('daily')}
-                              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${overviewTimeframe === 'daily' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                            >
-                              Quotidien
-                            </button>
-                            <button 
-                              onClick={() => setOverviewTimeframe('monthly')}
-                              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${overviewTimeframe === 'monthly' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-                            >
-                              Mensuel
-                            </button>
-                          </div>
-                        </div>
-                        <div className="h-72 w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={overviewTimeframe === 'daily' ? dynamicRevenueDaily : dynamicRevenueMonthly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                              <defs>
-                                <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3}/>
-                                  <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
-                                </linearGradient>
-                                <linearGradient id="colorAds" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#c084fc" stopOpacity={0.3}/>
-                                  <stop offset="95%" stopColor="#c084fc" stopOpacity={0}/>
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff1a" />
-                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dx={-10} />
-                              <Tooltip 
-                                contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                itemStyle={{ fontSize: '14px', fontWeight: 500, color: '#f8fafc' }}
-                              />
-                              <Area type="monotone" name="Forfaits Wi-Fi" dataKey="sales" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
-                              <Area type="monotone" name="Publicités" dataKey="ads" stroke="#c084fc" strokeWidth={3} fillOpacity={1} fill="url(#colorAds)" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
+                      <SortableWidget key="revenue" id="revenue" className="lg:col-span-2">
+                        <DashboardWidget 
+                          transactions={filteredTransactions}
+                          title="Revenus des Forfaits & Tokens Wi-Fi"
+                          subtitle="Visualisation quotidienne et mensuelle générée par les accès Wi-Fi"
+                          isDraggable={true}
+                          onViewAll={() => setActiveTab('analytics')}
+                        />
                       </SortableWidget>
                     );
 
@@ -2227,6 +2187,14 @@ export default function Dashboard() {
                     </button>
                   </div>
                 </div>
+
+                {/* Dashboard Widget for Wi-Fi Access Token Revenue */}
+                <DashboardWidget 
+                  transactions={filteredTransactions}
+                  title="Revenus des Tokens & Vouchers Wi-Fi"
+                  subtitle="Performances financières et volume de vente des accès Wi-Fi"
+                  onViewAll={() => setActiveTab('analytics')}
+                />
 
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm overflow-hidden flex flex-col">
                  <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5">

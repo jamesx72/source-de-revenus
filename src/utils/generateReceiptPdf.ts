@@ -6,7 +6,34 @@ export function formatCurrency(amount: number, currency: string = 'EUR'): string
   return `${amount.toFixed(2)} ${symbol}`;
 }
 
-export function formatDuration(minutes: number): string {
+export function formatDuration(minutes: number, lang: 'fr' | 'en' | 'es' = 'fr'): string {
+  if (lang === 'en') {
+    if (minutes >= 1440) {
+      const days = Math.round(minutes / 1440);
+      return `${days} day${days > 1 ? 's' : ''} (${minutes / 60}h)`;
+    }
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours} hour${hours > 1 ? 's' : ''}`;
+    }
+    return `${minutes} minutes`;
+  }
+
+  if (lang === 'es') {
+    if (minutes >= 1440) {
+      const days = Math.round(minutes / 1440);
+      return `${days} día${days > 1 ? 's' : ''} (${minutes / 60}h)`;
+    }
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}min` : `${hours} hora${hours > 1 ? 's' : ''}`;
+    }
+    return `${minutes} minutos`;
+  }
+
+  // French default
   if (minutes >= 1440) {
     const days = Math.round(minutes / 1440);
     return `${days} jour${days > 1 ? 's' : ''} (${minutes / 60}h)`;
@@ -19,7 +46,166 @@ export function formatDuration(minutes: number): string {
   return `${minutes} minutes`;
 }
 
-export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
+interface I18nReceiptLabels {
+  subtitle: string;
+  title: string;
+  paidBadge: string;
+  vendorHeader: string;
+  networkSsid: string;
+  paymentDetails: string;
+  receiptNumber: string;
+  dateTime: string;
+  paymentMethod: string;
+  client: string;
+  serviceDesc: string;
+  duration: string;
+  qty: string;
+  unitPrice: string;
+  totalTtc: string;
+  planSubtitle: string;
+  discount: string;
+  subtotalHt: string;
+  vat: string;
+  totalDue: string;
+  fastAccessBoxTitle: string;
+  fastAccessBoxSub: string;
+  wifiAccessCode: string;
+  quickGuideTitle: string;
+  step1: string;
+  step2: string;
+  step3: string;
+  validityReminder: string;
+  legalHeader: string;
+  legalLine1: string;
+  legalLine2: string;
+  legalLine3: string;
+  footerBrand: string;
+  pageInfo: string;
+}
+
+const PDF_TRANSLATIONS: Record<'fr' | 'en' | 'es', I18nReceiptLabels> = {
+  fr: {
+    subtitle: "PASSERELLE D'ACCÈS INTERNET SÉCURISÉE",
+    title: "REÇU DE PAIEMENT",
+    paidBadge: "✓  PAYÉ",
+    vendorHeader: "ÉTABLISSEMENT / VENDEUR",
+    networkSsid: "Réseau Wi-Fi (SSID) :",
+    paymentDetails: "DÉTAILS DU RÈGLEMENT",
+    receiptNumber: "N° Reçu :",
+    dateTime: "Date & Heure :",
+    paymentMethod: "Règlement :",
+    client: "Client :",
+    serviceDesc: "DESCRIPTION DU SERVICE",
+    duration: "DURÉE",
+    qty: "QTÉ",
+    unitPrice: "P.U. HT",
+    totalTtc: "TOTAL TTC",
+    planSubtitle: "Connexion haute vitesse sécurisée sans interruption",
+    discount: "Remise appliquée (Code promo: {code})",
+    subtotalHt: "Sous-total HT :",
+    vat: "TVA ({rate}%) :",
+    totalDue: "TOTAL RÉGLÉ TTC :",
+    fastAccessBoxTitle: "VOS IDENTIFIANTS D'ACCÈS WI-FI",
+    fastAccessBoxSub: "À conserver pour connecter vos équipements ou en cas de reconnexion",
+    wifiAccessCode: "CODE D'ACCÈS WI-FI",
+    quickGuideTitle: "Instructions de connexion rapide :",
+    step1: "1. Connectez votre appareil au réseau : \"{ssid}\"",
+    step2: "2. Ouvrez le navigateur ou appuyez sur la notification de connexion",
+    step3: "3. Saisissez votre code d'accès pour commencer à naviguer",
+    validityReminder: "* Accès valable pour une durée de {duration} dès la première connexion.",
+    legalHeader: "INFORMATIONS & JUSTIFICATIF DE FRAIS",
+    legalLine1: "Ce reçu atteste du règlement d'un service d'accès aux télécommunications par le portail WiFiCash.",
+    legalLine2: "Il constitue un justificatif officiel pour votre comptabilité et le remboursement de vos notes de frais.",
+    legalLine3: "Pour toute assistance technique, veuillez contacter le gestionnaire de l'établissement ou support@wificash.io.",
+    footerBrand: "WiFiCash Cloud Services • Système de portail captif sécurisé certifié • Document dématérialisé",
+    pageInfo: "Émis le {date} • Page 1/1"
+  },
+  en: {
+    subtitle: "SECURE INTERNET GATEWAY & CAPTIVE PORTAL",
+    title: "PAYMENT RECEIPT",
+    paidBadge: "✓  PAID",
+    vendorHeader: "ESTABLISHMENT / VENDOR",
+    networkSsid: "Wi-Fi Network (SSID):",
+    paymentDetails: "PAYMENT DETAILS",
+    receiptNumber: "Receipt No:",
+    dateTime: "Date & Time:",
+    paymentMethod: "Payment:",
+    client: "Customer:",
+    serviceDesc: "SERVICE DESCRIPTION",
+    duration: "DURATION",
+    qty: "QTY",
+    unitPrice: "UNIT PRICE",
+    totalTtc: "TOTAL INCL. VAT",
+    planSubtitle: "High-speed secure connection with zero interruptions",
+    discount: "Discount applied (Promo code: {code})",
+    subtotalHt: "Subtotal excl. VAT:",
+    vat: "VAT ({rate}%):",
+    totalDue: "TOTAL PAID INCL. VAT:",
+    fastAccessBoxTitle: "YOUR WI-FI ACCESS CREDENTIALS",
+    fastAccessBoxSub: "Keep this to connect your devices or in case of reconnection",
+    wifiAccessCode: "WI-FI ACCESS CODE",
+    quickGuideTitle: "Quick connection instructions:",
+    step1: "1. Connect your device to network: \"{ssid}\"",
+    step2: "2. Open your browser or tap the Wi-Fi sign-in notification",
+    step3: "3. Enter your access code to start browsing",
+    validityReminder: "* Access valid for a duration of {duration} starting upon first connection.",
+    legalHeader: "OFFICIAL RECEIPT & EXPENSE REPORT DOCUMENT",
+    legalLine1: "This receipt certifies the payment for Wi-Fi telecommunications services through WiFiCash.",
+    legalLine2: "It serves as an official proof of expense for corporate accounting and tax reimbursement.",
+    legalLine3: "For technical support, contact the establishment desk or support@wificash.io.",
+    footerBrand: "WiFiCash Cloud Services • Certified Secure Captive Portal System • Digital Document",
+    pageInfo: "Issued on {date} • Page 1/1"
+  },
+  es: {
+    subtitle: "PASARELA DE ACCESO A INTERNET SEGURO",
+    title: "RECIBO DE PAGO",
+    paidBadge: "✓  PAGADO",
+    vendorHeader: "ESTABLECIMIENTO / VENDEDOR",
+    networkSsid: "Red Wi-Fi (SSID):",
+    paymentDetails: "DETALLES DEL PAGO",
+    receiptNumber: "N° Recibo:",
+    dateTime: "Fecha y hora:",
+    paymentMethod: "Método de pago:",
+    client: "Cliente:",
+    serviceDesc: "DESCRIPCIÓN DEL SERVICIO",
+    duration: "DURACIÓN",
+    qty: "CANT",
+    unitPrice: "PRECIO UNIT.",
+    totalTtc: "TOTAL CON IVA",
+    planSubtitle: "Conexión de alta velocidad segura y sin interrupciones",
+    discount: "Descuento aplicado (Código promo: {code})",
+    subtotalHt: "Subtotal sin IVA:",
+    vat: "IVA ({rate}%):",
+    totalDue: "TOTAL PAGADO:",
+    fastAccessBoxTitle: "SUS CREDENCIALES DE ACCESO WI-FI",
+    fastAccessBoxSub: "Guarde este código para conectar sus dispositivos o al reconectarse",
+    wifiAccessCode: "CÓDIGO DE ACCESO WI-FI",
+    quickGuideTitle: "Instrucciones de conexión rápida:",
+    step1: "1. Conecte su dispositivo a la red: \"{ssid}\"",
+    step2: "2. Abra el navegador o toque la notificación de inicio de sesión",
+    step3: "3. Introduzca su código de acceso para comenzar a navegar",
+    validityReminder: "* Acceso válido durante {duration} a partir de la primera conexión.",
+    legalHeader: "INFORMACIÓN Y JUSTIFICANTE DE GASTOS",
+    legalLine1: "Este recibo acredita el pago de un servicio de acceso a telecomunicaciones por WiFiCash.",
+    legalLine2: "Constituye un comprobante oficial para su contabilidad y el reembolso de gastos.",
+    legalLine3: "Para asistencia técnica, contacte con la recepción o soporte en support@wificash.io.",
+    footerBrand: "WiFiCash Cloud Services • Sistema de portal cautivo certificado • Documento digital",
+    pageInfo: "Emitido el {date} • Página 1/1"
+  }
+};
+
+export function generateReceiptPdf(receipt: WifiReceipt, language?: 'fr' | 'en' | 'es'): jsPDF {
+  // Determine language: explicit argument or fallback to localStorage
+  let lang: 'fr' | 'en' | 'es' = language || 'fr';
+  if (!language && typeof window !== 'undefined') {
+    const saved = localStorage.getItem('language');
+    if (saved === 'en' || saved === 'es' || saved === 'fr') {
+      lang = saved;
+    }
+  }
+
+  const t = PDF_TRANSLATIONS[lang] || PDF_TRANSLATIONS.fr;
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -64,13 +250,13 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...mutedTextColor);
-  doc.text('PASSERELLE D\'ACCÈS INTERNET SÉCURISÉE', margin + 16, currentY + 4.5);
+  doc.text(t.subtitle, margin + 16, currentY + 4.5);
 
   // Receipt Title & Badge on Right
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.setTextColor(...primaryColor);
-  doc.text('REÇU DE PAIEMENT', pageWidth - margin, currentY - 2, { align: 'right' });
+  doc.text(t.title, pageWidth - margin, currentY - 2, { align: 'right' });
 
   // Paid Status Pill
   const badgeWidth = 28;
@@ -86,7 +272,7 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setTextColor(...emeraldColor);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('✓  PAYÉ', badgeX + badgeWidth / 2, badgeY + 4.3, { align: 'center' });
+  doc.text(t.paidBadge, badgeX + badgeWidth / 2, badgeY + 4.3, { align: 'center' });
 
   currentY += 18;
 
@@ -105,7 +291,7 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text('ÉTABLISSEMENT / VENDEUR', col1X, currentY);
+  doc.text(t.vendorHeader, col1X, currentY);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
@@ -118,15 +304,16 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   if (receipt.locationAddress) {
     doc.text(receipt.locationAddress, col1X, currentY + 10.5);
   }
-  doc.text(`Réseau Wi-Fi (SSID) : ${receipt.wifiSsid || 'WiFi-Guest'}`, col1X, currentY + 15.5);
+  doc.text(`${t.networkSsid} ${receipt.wifiSsid || 'WiFi-Guest'}`, col1X, currentY + 15.5);
 
   // Right Column: Transaction / Invoice info
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text('DÉTAILS DU RÈGLEMENT', col2X, currentY);
+  doc.text(t.paymentDetails, col2X, currentY);
 
-  const formattedDate = new Date(receipt.createdAt || Date.now()).toLocaleString('fr-FR', {
+  const locale = lang === 'en' ? 'en-US' : lang === 'es' ? 'es-ES' : 'fr-FR';
+  const formattedDate = new Date(receipt.createdAt || Date.now()).toLocaleString(locale, {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
@@ -137,25 +324,24 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...darkTextColor);
-  doc.text(`N° Reçu : `, col2X, currentY + 5.5);
+  doc.text(`${t.receiptNumber} `, col2X, currentY + 5.5);
   doc.setFont('helvetica', 'bold');
-  doc.text(receipt.id, col2X + 16, currentY + 5.5);
+  doc.text(receipt.id, col2X + 22, currentY + 5.5);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`Date & Heure : `, col2X, currentY + 10.5);
-  doc.text(formattedDate, col2X + 22, currentY + 10.5);
+  doc.text(`${t.dateTime} `, col2X, currentY + 10.5);
+  doc.text(formattedDate, col2X + 26, currentY + 10.5);
 
-  doc.text(`Règlement : `, col2X, currentY + 15.5);
-  doc.text(receipt.paymentMethod || 'Carte Bancaire / Stripe', col2X + 18, currentY + 15.5);
+  doc.text(`${t.paymentMethod} `, col2X, currentY + 15.5);
+  doc.text(receipt.paymentMethod || 'Carte Bancaire / Stripe', col2X + 26, currentY + 15.5);
 
   if (receipt.customerEmail) {
-    doc.text(`Client : ${receipt.customerEmail}`, col2X, currentY + 20.5);
+    doc.text(`${t.client} ${receipt.customerEmail}`, col2X, currentY + 20.5);
   }
 
   currentY += 28;
 
   // Itemized Purchase Table
-  // Header
   const tableHeaderY = currentY;
   const tableHeaderHeight = 8;
   doc.setFillColor(...lightBgColor);
@@ -173,11 +359,11 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   const colUnitPriceX = margin + 125;
   const colTotalX = pageWidth - margin - 4;
 
-  doc.text('DESCRIPTION DU SERVICE', colDescX, tableHeaderY + 5.2);
-  doc.text('DURÉE', colDurationX, tableHeaderY + 5.2);
-  doc.text('QTÉ', colQtyX, tableHeaderY + 5.2);
-  doc.text('P.U. HT', colUnitPriceX, tableHeaderY + 5.2);
-  doc.text('TOTAL TTC', colTotalX, tableHeaderY + 5.2, { align: 'right' });
+  doc.text(t.serviceDesc, colDescX, tableHeaderY + 5.2);
+  doc.text(t.duration, colDurationX, tableHeaderY + 5.2);
+  doc.text(t.qty, colQtyX, tableHeaderY + 5.2);
+  doc.text(t.unitPrice, colUnitPriceX, tableHeaderY + 5.2);
+  doc.text(t.totalTtc, colTotalX, tableHeaderY + 5.2, { align: 'right' });
 
   currentY = tableHeaderY + tableHeaderHeight;
 
@@ -196,17 +382,17 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(...darkTextColor);
-  doc.text(`Forfait Wi-Fi Premium - ${receipt.planName || 'Accès Internet'}`, colDescX, currentY + 5.5);
+  doc.text(`Wi-Fi - ${receipt.planName || 'Internet Access'}`, colDescX, currentY + 5.5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text('Connexion haute vitesse sécurisée sans interruption', colDescX, currentY + 9.5);
+  doc.text(t.planSubtitle, colDescX, currentY + 9.5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...darkTextColor);
-  doc.text(formatDuration(receipt.durationMinutes || 60), colDurationX, currentY + 6.5);
+  doc.text(formatDuration(receipt.durationMinutes || 60, lang), colDurationX, currentY + 6.5);
   doc.text('1', colQtyX, currentY + 6.5);
   doc.text(formatCurrency(totalHt, currency), colUnitPriceX, currentY + 6.5);
   
@@ -224,7 +410,7 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(...emeraldColor);
-    doc.text(`Remise appliquée (Code promo: ${receipt.discountCode})`, colDescX, currentY + 5.5);
+    doc.text(t.discount.replace('{code}', receipt.discountCode), colDescX, currentY + 5.5);
     doc.text(`-${formatCurrency(receipt.discountAmount, currency)}`, colTotalX, currentY + 5.5, { align: 'right' });
 
     currentY += discountRowHeight;
@@ -239,64 +425,54 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text('Sous-total HT :', totalsBoxX, currentY);
+  doc.text(t.subtotalHt, totalsBoxX, currentY);
   doc.setTextColor(...darkTextColor);
   doc.text(formatCurrency(totalHt, currency), pageWidth - margin, currentY, { align: 'right' });
 
   currentY += 5;
   doc.setTextColor(...mutedTextColor);
-  doc.text(`TVA (${vatRate}%) :`, totalsBoxX, currentY);
+  doc.text(t.vat.replace('{rate}', String(vatRate)), totalsBoxX, currentY);
   doc.setTextColor(...darkTextColor);
   doc.text(formatCurrency(vatAmount, currency), pageWidth - margin, currentY, { align: 'right' });
 
   currentY += 6;
-  doc.setDrawColor(...borderColor);
-  doc.setLineWidth(0.4);
-  doc.line(totalsBoxX, currentY - 1.5, pageWidth - margin, currentY - 1.5);
-
-  // Total TTC Highlighted
-  doc.setFillColor(243, 244, 246);
-  doc.roundedRect(totalsBoxX - 2, currentY - 0.5, totalsBoxWidth + 2, 8, 1, 1, 'F');
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(...primaryColor);
-  doc.text('TOTAL PAYÉ (TTC) :', totalsBoxX + 2, currentY + 5.2);
-  doc.setFontSize(11);
-  doc.setTextColor(...accentColor);
-  doc.text(formatCurrency(totalTtc, currency), pageWidth - margin, currentY + 5.2, { align: 'right' });
-
-  currentY += 18;
-
-  // Highlight Box: WI-FI ACCESS CODE & CONNECTION CREDENTIALS
-  const accessBoxY = currentY;
-  const accessBoxHeight = 44;
-
-  doc.setFillColor(238, 242, 255); // indigo-50
-  doc.setDrawColor(...accentColor);
-  doc.setLineWidth(0.5);
-  doc.roundedRect(margin, accessBoxY, contentWidth, accessBoxHeight, 3, 3, 'FD');
-
-  // Box Header
+  doc.setFillColor(...lightBgColor);
+  doc.roundedRect(totalsBoxX - 2, currentY - 4.5, totalsBoxWidth + 4, 9, 1.5, 1.5, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...accentColor);
-  doc.text('VOS IDENTIFIANTS DE CONNEXION WI-FI', margin + 8, accessBoxY + 8);
+  doc.text(t.totalDue, totalsBoxX, currentY + 1.5);
+  doc.text(formatCurrency(totalTtc, currency), pageWidth - margin, currentY + 1.5, { align: 'right' });
+
+  currentY += 16;
+
+  // Access Token Box
+  const accessBoxY = currentY;
+  const accessBoxHeight = 44;
+  doc.setFillColor(238, 242, 255); // indigo-50
+  doc.setDrawColor(...accentColor);
+  doc.setLineWidth(0.6);
+  doc.roundedRect(margin, accessBoxY, contentWidth, accessBoxHeight, 3, 3, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(...accentColor);
+  doc.text(t.fastAccessBoxTitle, margin + 8, accessBoxY + 8);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...mutedTextColor);
-  doc.text('Conservez précieusement ce code pour déverrouiller votre accès internet sur vos appareils.', margin + 8, accessBoxY + 13);
+  doc.text(t.fastAccessBoxSub, margin + 8, accessBoxY + 13);
 
-  // Voucher Code Display
-  const codeBoxWidth = 85;
-  const codeBoxHeight = 13;
+  // Voucher Code Badge Box
   const codeBoxX = margin + 8;
   const codeBoxY = accessBoxY + 17;
+  const codeBoxWidth = 85;
+  const codeBoxHeight = 14;
 
   doc.setFillColor(255, 255, 255);
-  doc.setDrawColor(199, 210, 254); // indigo-200
-  doc.setLineWidth(0.3);
+  doc.setDrawColor(...accentColor);
+  doc.setLineWidth(0.4);
   doc.roundedRect(codeBoxX, codeBoxY, codeBoxWidth, codeBoxHeight, 2, 2, 'FD');
 
   doc.setFont('courier', 'bold');
@@ -309,20 +485,20 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...darkTextColor);
-  doc.text('Instructions de connexion rapide :', guideX, accessBoxY + 19);
+  doc.text(t.quickGuideTitle, guideX, accessBoxY + 19);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text(`1. Connectez votre appareil au réseau : "${receipt.wifiSsid || 'WiFi-Guest'}"`, guideX, accessBoxY + 24);
-  doc.text('2. Ouvrez le navigateur ou appuyez sur la notification de connexion', guideX, accessBoxY + 28);
-  doc.text('3. Saisissez votre code d\'accès pour commencer à naviguer', guideX, accessBoxY + 32);
+  doc.text(t.step1.replace('{ssid}', receipt.wifiSsid || 'WiFi-Guest'), guideX, accessBoxY + 24);
+  doc.text(t.step2, guideX, accessBoxY + 28);
+  doc.text(t.step3, guideX, accessBoxY + 32);
 
   // Validity reminder at bottom of access box
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(7.5);
   doc.setTextColor(...accentColor);
-  doc.text(`* Accès valable pour une durée de ${formatDuration(receipt.durationMinutes || 60)} dès la première connexion.`, margin + 8, accessBoxY + 39);
+  doc.text(t.validityReminder.replace('{duration}', formatDuration(receipt.durationMinutes || 60, lang)), margin + 8, accessBoxY + 39);
 
   currentY = accessBoxY + accessBoxHeight + 14;
 
@@ -335,14 +511,14 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...darkTextColor);
-  doc.text('INFORMATIONS & JUSTIFICATIF DE FRAIS', margin + 6, currentY + 6);
+  doc.text(t.legalHeader, margin + 6, currentY + 6);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...mutedTextColor);
-  doc.text('Ce reçu atteste du règlement d\'un service d\'accès aux télécommunications par le portail WiFiCash.', margin + 6, currentY + 11);
-  doc.text('Il constitue un justificatif officiel pour votre comptabilité et le remboursement de vos notes de frais.', margin + 6, currentY + 15.5);
-  doc.text('Pour toute assistance technique, veuillez contacter le gestionnaire de l\'établissement ou support@wificash.io.', margin + 6, currentY + 20);
+  doc.text(t.legalLine1, margin + 6, currentY + 11);
+  doc.text(t.legalLine2, margin + 6, currentY + 15.5);
+  doc.text(t.legalLine3, margin + 6, currentY + 20);
 
   // Footer / Page Bottom
   const footerY = pageHeight - 16;
@@ -353,22 +529,21 @@ export function generateReceiptPdf(receipt: WifiReceipt): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...mutedTextColor);
-  doc.text('WiFiCash Cloud Services • Système de portail captif sécurisé certifié • Document dématérialisé', margin, footerY);
-  doc.text(`Émis le ${new Date().toLocaleDateString('fr-FR')} • Page 1/1`, pageWidth - margin, footerY, { align: 'right' });
+  doc.text(t.footerBrand, margin, footerY);
+  doc.text(t.pageInfo.replace('{date}', new Date().toLocaleDateString(locale)), pageWidth - margin, footerY, { align: 'right' });
 
   return doc;
 }
 
-export function downloadReceiptPdf(receipt: WifiReceipt): void {
-  const doc = generateReceiptPdf(receipt);
+export function downloadReceiptPdf(receipt: WifiReceipt, language?: 'fr' | 'en' | 'es'): void {
+  const doc = generateReceiptPdf(receipt, language);
   const cleanId = receipt.id.replace(/[^a-zA-Z0-9_-]/g, '_');
   const filename = `Recu-WiFi-${cleanId}.pdf`;
   doc.save(filename);
 }
 
-export function printReceipt(receipt: WifiReceipt): void {
-  const doc = generateReceiptPdf(receipt);
-  // jsPDF provides autoPrint & output for printing
+export function printReceipt(receipt: WifiReceipt, language?: 'fr' | 'en' | 'es'): void {
+  const doc = generateReceiptPdf(receipt, language);
   const pdfBlob = doc.output('blob');
   const blobUrl = URL.createObjectURL(pdfBlob);
   const iframe = document.createElement('iframe');

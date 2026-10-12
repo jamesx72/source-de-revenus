@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { WifiReceipt } from '../types';
 import { downloadReceiptPdf, printReceipt, formatCurrency, formatDuration } from '../utils/generateReceiptPdf';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface ReceiptModalProps {
 }
 
 export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
+  const { language, t } = useLanguage();
   const [copiedCode, setCopiedCode] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [guestEmail, setGuestEmail] = useState('');
@@ -24,20 +26,20 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
   const handleCopyCode = () => {
     navigator.clipboard.writeText(receipt.voucherCode);
     setCopiedCode(true);
-    toast.success('Code Wi-Fi copié dans le presse-papier !');
+    toast.success(t('receipt.code_copied'));
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
   const handleDownload = () => {
     try {
       setIsDownloading(true);
-      downloadReceiptPdf(receipt);
-      toast.success('Reçu PDF téléchargé avec succès !', {
-        description: `Fichier : Recu-WiFi-${receipt.id}.pdf`,
+      downloadReceiptPdf(receipt, language);
+      toast.success(t('portal.receipt_downloaded') || 'Reçu PDF téléchargé avec succès !', {
+        description: `Recu-WiFi-${receipt.id}.pdf`,
       });
     } catch (err) {
       console.error('Erreur lors du téléchargement du PDF:', err);
-      toast.error('Échec de la génération du PDF');
+      toast.error(t('portal.receipt_error') || 'Échec de la génération du PDF');
     } finally {
       setTimeout(() => setIsDownloading(false), 600);
     }
@@ -45,10 +47,10 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
 
   const handlePrint = () => {
     try {
-      printReceipt(receipt);
+      printReceipt(receipt, language);
     } catch (err) {
       console.error('Erreur d\'impression:', err);
-      toast.error('Impossible d\'ouvrir la boîte d\'impression.');
+      toast.error(t('receipt.print_error'));
     }
   };
 
@@ -60,9 +62,9 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
       // Simulate or call email notification
       await new Promise(resolve => setTimeout(resolve, 800));
       setEmailSent(true);
-      toast.success(`Reçu envoyé à ${guestEmail} !`);
+      toast.success(t('receipt.email_sent'));
     } catch (err) {
-      toast.error("Erreur lors de l'envoi du reçu par e-mail.");
+      toast.error(t('portal.error_occurred'));
     } finally {
       setIsSendingEmail(false);
     }
@@ -74,7 +76,8 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
   const vatAmount = Math.round((totalTtc - totalHt) * 100) / 100;
   const currency = receipt.currency || 'EUR';
 
-  const formattedDate = new Date(receipt.createdAt || Date.now()).toLocaleString('fr-FR', {
+  const dateLocale = language === 'en' ? 'en-US' : language === 'es' ? 'es-ES' : 'fr-FR';
+  const formattedDate = new Date(receipt.createdAt || Date.now()).toLocaleString(dateLocale, {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
@@ -109,10 +112,10 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg leading-tight">
-                  Reçu d'Achat Wi-Fi
+                  {t('receipt.modal_title')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Modèle professionnel prêt à imprimer ou télécharger
+                  {t('receipt.modal_subtitle')}
                 </p>
               </div>
             </div>
@@ -121,10 +124,10 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
               <button
                 onClick={handlePrint}
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl transition-colors border border-slate-200 dark:border-white/10"
-                title="Imprimer"
+                title={t('receipt.print')}
               >
                 <Printer size={15} />
-                <span>Imprimer</span>
+                <span>{t('receipt.print')}</span>
               </button>
 
               <button
@@ -133,13 +136,13 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                 className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition-colors disabled:opacity-50"
               >
                 <Download size={15} />
-                <span>{isDownloading ? 'Génération...' : 'Télécharger PDF'}</span>
+                <span>{isDownloading ? t('receipt.downloading') : t('receipt.download_pdf')}</span>
               </button>
 
               <button
                 onClick={onClose}
                 className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors ml-1"
-                aria-label="Fermer"
+                aria-label={t('receipt.close')}
               >
                 <X size={20} />
               </button>
@@ -165,7 +168,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                   <div>
                     <div className="font-extrabold text-xl tracking-tight text-slate-900">WiFiCash</div>
                     <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                      Passerelle d'accès internet sécurisée
+                      {t('receipt.gateway_tag')}
                     </div>
                   </div>
                 </div>
@@ -173,10 +176,10 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                 <div className="text-left sm:text-right">
                   <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-bold mb-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>✓ PAYÉ</span>
+                    <span>{t('receipt.paid_badge')}</span>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Réf : <span className="font-mono font-bold text-slate-800">{receipt.id}</span>
+                    {t('receipt.ref')} : <span className="font-mono font-bold text-slate-800">{receipt.id}</span>
                   </div>
                 </div>
               </div>
@@ -185,30 +188,30 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm">
                 <div className="space-y-1">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Building size={13} className="text-indigo-600" /> Établissement / Vendeur
+                    <Building size={13} className="text-indigo-600" /> {t('receipt.seller_header')}
                   </div>
                   <div className="font-bold text-slate-900 text-base">{receipt.locationName}</div>
                   {receipt.locationAddress && (
                     <div className="text-xs text-slate-500">{receipt.locationAddress}</div>
                   )}
                   <div className="text-xs text-slate-600 pt-0.5">
-                    Réseau Wi-Fi : <span className="font-semibold text-indigo-600">{receipt.wifiSsid || 'WiFi-Guest'}</span>
+                    {t('receipt.wifi_network')} : <span className="font-semibold text-indigo-600">{receipt.wifiSsid || 'WiFi-Guest'}</span>
                   </div>
                 </div>
 
                 <div className="space-y-1 sm:text-right">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center sm:justify-end gap-1.5">
-                    <Calendar size={13} className="text-indigo-600" /> Détails du règlement
+                    <Calendar size={13} className="text-indigo-600" /> {t('receipt.payment_details')}
                   </div>
                   <div className="text-xs text-slate-600">
-                    Date : <span className="font-semibold text-slate-800">{formattedDate}</span>
+                    {t('receipt.date')} : <span className="font-semibold text-slate-800">{formattedDate}</span>
                   </div>
                   <div className="text-xs text-slate-600 flex items-center sm:justify-end gap-1">
-                    <CreditCard size={12} className="text-slate-400" /> {receipt.paymentMethod || 'Carte Bancaire (Stripe)'}
+                    <CreditCard size={12} className="text-slate-400" /> {receipt.paymentMethod || t('portal.card_stripe')}
                   </div>
                   {receipt.customerEmail && (
                     <div className="text-xs text-slate-500">
-                      Client : <span className="font-medium text-slate-700">{receipt.customerEmail}</span>
+                      {t('receipt.client')} : <span className="font-medium text-slate-700">{receipt.customerEmail}</span>
                     </div>
                   )}
                 </div>
@@ -219,25 +222,25 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                 <table className="w-full text-left border-collapse text-xs sm:text-sm">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-[11px] uppercase tracking-wider">
-                      <th className="py-2.5 px-3 sm:px-4">Description</th>
-                      <th className="py-2.5 px-2 text-center">Durée</th>
-                      <th className="py-2.5 px-2 text-center">Qté</th>
-                      <th className="py-2.5 px-3 text-right">P.U. HT</th>
-                      <th className="py-2.5 px-3 sm:px-4 text-right">Total TTC</th>
+                      <th className="py-2.5 px-3 sm:px-4">{t('receipt.col_desc')}</th>
+                      <th className="py-2.5 px-2 text-center">{t('receipt.col_duration')}</th>
+                      <th className="py-2.5 px-2 text-center">{t('receipt.col_qty')}</th>
+                      <th className="py-2.5 px-3 text-right">{t('receipt.col_unit_ht')}</th>
+                      <th className="py-2.5 px-3 sm:px-4 text-right">{t('receipt.col_total_ttc')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     <tr>
                       <td className="py-3 px-3 sm:px-4">
                         <div className="font-bold text-slate-900">
-                          Forfait Wi-Fi - {receipt.planName || 'Accès Internet'}
+                          {t('receipt.plan_item')} - {receipt.planName || 'Internet'}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          Connexion haut débit illimitée & sécurisée
+                          {t('receipt.plan_sub')}
                         </div>
                       </td>
                       <td className="py-3 px-2 text-center text-slate-600 font-medium">
-                        {formatDuration(receipt.durationMinutes || 60)}
+                        {formatDuration(receipt.durationMinutes || 60, language)}
                       </td>
                       <td className="py-3 px-2 text-center text-slate-600">1</td>
                       <td className="py-3 px-3 text-right text-slate-600 font-mono">
@@ -250,7 +253,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                     {receipt.discountCode && receipt.discountAmount && (
                       <tr className="bg-emerald-50/40 text-emerald-700">
                         <td colSpan={4} className="py-2 px-3 sm:px-4 text-xs font-medium">
-                          Remise appliquée (Code promo: {receipt.discountCode})
+                          {t('receipt.discount_applied', { code: receipt.discountCode })}
                         </td>
                         <td className="py-2 px-3 sm:px-4 text-right font-bold font-mono">
                           -{formatCurrency(receipt.discountAmount, currency)}
@@ -265,15 +268,15 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
               <div className="flex justify-end pt-1">
                 <div className="w-full sm:w-64 space-y-1.5 text-xs text-slate-600">
                   <div className="flex justify-between py-0.5">
-                    <span>Sous-total HT :</span>
+                    <span>{t('receipt.subtotal_ht')} :</span>
                     <span className="font-mono text-slate-800">{formatCurrency(totalHt, currency)}</span>
                   </div>
                   <div className="flex justify-between py-0.5">
-                    <span>TVA ({vatRate}%) :</span>
+                    <span>{t('receipt.vat')} ({vatRate}%) :</span>
                     <span className="font-mono text-slate-800">{formatCurrency(vatAmount, currency)}</span>
                   </div>
                   <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-sm text-slate-900">
-                    <span className="text-indigo-700">TOTAL PAYÉ (TTC) :</span>
+                    <span className="text-indigo-700">{t('receipt.total_paid')} :</span>
                     <span className="font-mono text-indigo-700 text-base">{formatCurrency(totalTtc, currency)}</span>
                   </div>
                 </div>
@@ -283,7 +286,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
               <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="space-y-2 text-center sm:text-left flex-1">
                   <div className="text-xs font-bold uppercase tracking-wider text-indigo-700 flex items-center justify-center sm:justify-start gap-1.5">
-                    <Sparkles size={14} /> Vos Identifiants de Connexion Wi-Fi
+                    <Sparkles size={14} /> {t('receipt.credentials_title')}
                   </div>
                   
                   <div className="flex items-center justify-center sm:justify-start gap-2">
@@ -293,14 +296,14 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                     <button
                       onClick={handleCopyCode}
                       className="p-2.5 bg-white hover:bg-indigo-100 text-indigo-600 rounded-xl border border-indigo-200 transition-colors shadow-sm"
-                      title="Copier le code"
+                      title={t('receipt.code_copied')}
                     >
                       {copiedCode ? <Check size={18} className="text-emerald-600" /> : <Copy size={18} />}
                     </button>
                   </div>
 
                   <p className="text-[11px] text-indigo-900/80">
-                    Connectez-vous au réseau <strong>{receipt.wifiSsid || 'WiFi-Guest'}</strong> et saisissez ce code sur la page de connexion.
+                    {t('receipt.credentials_help', { ssid: receipt.wifiSsid || 'WiFi-Guest' })}
                   </p>
                 </div>
 
@@ -311,16 +314,16 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                     size={72} 
                     level="M" 
                   />
-                  <span className="text-[9px] text-slate-500 font-semibold mt-1">Scan Wi-Fi</span>
+                  <span className="text-[9px] text-slate-500 font-semibold mt-1">{t('receipt.scan_qr')}</span>
                 </div>
               </div>
 
               {/* Legal Note & Accounting Justification */}
               <div className="text-[11px] text-slate-500 bg-slate-50 rounded-xl p-3 border border-slate-100 leading-relaxed">
                 <div className="font-semibold text-slate-700 flex items-center gap-1 mb-0.5">
-                  <ShieldCheck size={13} className="text-emerald-600" /> Preuve d'achat & Note de frais
+                  <ShieldCheck size={13} className="text-emerald-600" /> {t('receipt.legal_title')}
                 </div>
-                Ce document atteste du paiement du forfait Wi-Fi pour la durée indiquée. Conservez-le pour votre justificatif comptable.
+                {t('receipt.legal_body')}
               </div>
             </div>
 
@@ -328,11 +331,11 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
             <div className="bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-4">
               <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center gap-1.5">
                 <Mail size={14} className="text-indigo-500" />
-                Recevoir une copie du reçu par e-mail
+                {t('receipt.email_copy_title')}
               </h4>
               {emailSent ? (
                 <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-50 dark:bg-emerald-500/10 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-500/20">
-                  <Check size={14} /> E-mail envoyé avec succès !
+                  <Check size={14} /> {t('receipt.email_sent')}
                 </div>
               ) : (
                 <form onSubmit={handleSendEmail} className="flex gap-2">
@@ -340,7 +343,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                     type="email"
                     value={guestEmail}
                     onChange={(e) => setGuestEmail(e.target.value)}
-                    placeholder="votre.email@exemple.com"
+                    placeholder={t('receipt.email_placeholder')}
                     className="flex-1 text-xs px-3 py-2 bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                   <button
@@ -348,7 +351,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                     disabled={isSendingEmail || !guestEmail.trim()}
                     className="px-3.5 py-2 text-xs font-semibold bg-slate-900 dark:bg-indigo-600 text-white rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
                   >
-                    {isSendingEmail ? 'Envoi...' : 'Envoyer'}
+                    {isSendingEmail ? t('receipt.sending') : t('receipt.send')}
                   </button>
                 </form>
               )}
@@ -358,14 +361,14 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
           {/* Modal Footer */}
           <div className="p-4 border-t border-slate-100 dark:border-white/10 bg-slate-50/70 dark:bg-white/[0.02] flex items-center justify-between">
             <span className="text-xs text-slate-400">
-              Format A4 haute résolution • Prêt pour archivage
+              {t('receipt.footer_note')}
             </span>
             <div className="flex items-center gap-2">
               <button
                 onClick={onClose}
                 className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl transition-colors"
               >
-                Fermer
+                {t('receipt.close')}
               </button>
               <button
                 onClick={handleDownload}
@@ -373,7 +376,7 @@ export function ReceiptModal({ isOpen, onClose, receipt }: ReceiptModalProps) {
                 className="flex items-center gap-2 px-5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md shadow-indigo-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
               >
                 <Download size={14} />
-                <span>{isDownloading ? 'Téléchargement...' : 'Télécharger le PDF'}</span>
+                <span>{isDownloading ? t('receipt.downloading') : t('receipt.download_pdf')}</span>
               </button>
             </div>
           </div>

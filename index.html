@@ -12,8 +12,31 @@
         var isWsError = function(msg) {
           if (!msg) return false;
           var s = String(msg);
-          return s.includes('WebSocket') || s.includes('@vite/client') || s.includes('createWebSocketModuleRunnerTransport');
+          return s.includes('WebSocket') || 
+                 s.includes('@vite/client') || 
+                 s.includes('createWebSocketModuleRunnerTransport') ||
+                 s.includes('[vite] failed to connect to websocket') ||
+                 s.includes('WebSocket closed without opened');
         };
+
+        var origWarn = console.warn;
+        console.warn = function() {
+          var args = Array.prototype.slice.call(arguments);
+          for (var i = 0; i < args.length; i++) {
+            if (isWsError(args[i])) return;
+          }
+          origWarn.apply(console, args);
+        };
+
+        var origError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          for (var i = 0; i < args.length; i++) {
+            if (isWsError(args[i])) return;
+          }
+          origError.apply(console, args);
+        };
+
         window.addEventListener('error', function(e) {
           if (isWsError(e.message) || isWsError(e.error)) {
             e.preventDefault();
@@ -21,6 +44,7 @@
             return true;
           }
         }, true);
+
         window.addEventListener('unhandledrejection', function(e) {
           if (isWsError(e.reason)) {
             e.preventDefault();

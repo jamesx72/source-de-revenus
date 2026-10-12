@@ -20,6 +20,7 @@ const stripePromise = loadStripe((import.meta as any).env.VITE_STRIPE_PUBLIC_KEY
 function CheckoutForm({ duration }: { duration: number }) {
   const stripe = useStripe();
   const elements = useElements();
+  const { t } = useLanguage();
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -40,7 +41,7 @@ function CheckoutForm({ duration }: { duration: number }) {
     });
 
     if (error) {
-      setErrorMessage(error.message || 'Une erreur est survenue.');
+      setErrorMessage(error.message || t('portal.error_occurred'));
     }
 
     setIsProcessing(false);
@@ -53,9 +54,9 @@ function CheckoutForm({ duration }: { duration: number }) {
       <button 
         type="submit" 
         disabled={!stripe || isProcessing}
-        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-lg font-bold flex justify-center mt-4"
+        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-lg font-bold flex justify-center mt-4 transition-colors disabled:opacity-50"
       >
-        {isProcessing ? 'Traitement en cours...' : 'Payer'}
+        {isProcessing ? t('portal.processing') : t('portal.pay')}
       </button>
     </form>
   );
@@ -114,7 +115,7 @@ function CountdownTimer({ timeLeft, maxTime }: { timeLeft: number | null, maxTim
 }
 
 export default function CaptivePortal() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const [searchParams] = useSearchParams();
   const locationId = searchParams.get('locationId');
   const isDemo = searchParams.get('demo') === 'true';
@@ -247,9 +248,42 @@ export default function CaptivePortal() {
         });
         setPaymentConfig({
            currency: 'eur',
+           price1h: 2.5,
+           price24h: 5,
            passes: [
-             { id: '1', name: 'Pass 1 Heure', price: 2, duration: 60, stripePriceId: '' },
-             { id: '2', name: 'Pass 24 Heures', price: 5, duration: 1440, stripePriceId: '' }
+             { 
+               id: 'demo-free', 
+               name: 'Pass Découverte', 
+               price: 0, 
+               duration: 30, 
+               badge: 'Gratuit', 
+               isAdSupported: true, 
+               downloadSpeedLimit: 15,
+               description: 'Session sponsorisée avec 1 courte annonce',
+               stripePriceId: '' 
+             },
+             { 
+               id: 'demo-2h', 
+               name: 'Pass Coffee & Work (2h)', 
+               price: 2.5, 
+               duration: 120, 
+               badge: 'Populaire', 
+               isAdSupported: false, 
+               downloadSpeedLimit: 40,
+               description: 'Haut débit prioritaire sans publicité',
+               stripePriceId: '' 
+             },
+             { 
+               id: 'demo-24h', 
+               name: 'Pass Journée Complète (24h)', 
+               price: 5, 
+               duration: 1440, 
+               badge: 'Meilleure Offre', 
+               isAdSupported: false, 
+               downloadSpeedLimit: 60,
+               description: 'Accès illimité 24h multi-appareils',
+               stripePriceId: '' 
+             }
            ]
         });
         setIsLoading(false);
@@ -335,11 +369,11 @@ export default function CaptivePortal() {
         setClientSecret(data.clientSecret);
         setStep('payment');
       } else {
-        alert(data.error || 'Erreur lors de la session');
+        toast.error(data.error || t('portal.payment_session_error'));
       }
     } catch (err) {
       console.error(err);
-      alert('Erreur inconnue');
+      toast.error(t('portal.error_occurred'));
     } finally {
       setIsProcessingPayment(false);
     }
@@ -357,13 +391,13 @@ export default function CaptivePortal() {
       const snapshot = await getDocs(q);
       
       if (snapshot.empty) {
-        setPromoError('Code promo invalide ou expiré.');
+        setPromoError(t('portal.promo_invalid'));
         setAppliedPromo(null);
       } else {
         const discountDoc = snapshot.docs[0];
         const data = discountDoc.data();
         if (data.maxUses !== null && data.uses >= data.maxUses) {
-            setPromoError('Ce code a atteint sa limite d\'utilisation.');
+            setPromoError(t('portal.promo_limit'));
             setAppliedPromo(null);
         } else {
             setAppliedPromo({ id: discountDoc.id, ...data });
@@ -371,7 +405,7 @@ export default function CaptivePortal() {
       }
     } catch (err) {
        console.error(err);
-       setPromoError('Erreur lors de la vérification.');
+       setPromoError(t('portal.promo_error'));
     } finally {
        setIsApplyingPromo(true);
        setTimeout(() => setIsApplyingPromo(false), 500); // Visual feedback
@@ -985,7 +1019,7 @@ export default function CaptivePortal() {
                       onClick={() => {
                         try {
                           setIsDownloadingReceipt(true);
-                          downloadReceiptPdf(currentReceipt);
+                          downloadReceiptPdf(currentReceipt, language);
                           toast.success(t('portal.receipt_downloaded'));
                         } catch (err) {
                           toast.error(t('portal.receipt_error'));

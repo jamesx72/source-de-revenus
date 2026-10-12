@@ -83,102 +83,102 @@ const PRESET_TEMPLATES = [
     ]
   },
   {
-    id: 'coworking',
-    name: 'Espace Coworking',
-    description: 'Tarification professionnelle adaptée aux télétravailleurs et résidents.',
-    icon: '💼',
+    id: 'coworking-hotel',
+    name: 'Coworking & Hôtel',
+    description: 'Tarification hybride pour télétravailleurs, séjours d\'affaires et résidents.',
+    icon: '🏨',
     plans: [
       {
-        id: 'plan-cowork-2h',
-        name: 'Pass Sprint 2H',
-        duration: 120,
-        price: 4.0,
-        badge: 'Express',
+        id: 'plan-cowork-hotel-free',
+        name: 'Pass Découverte Lobby',
+        duration: 45,
+        price: 0,
+        badge: 'Inclus',
+        isAdSupported: true,
+        downloadSpeedLimit: 12,
+        uploadSpeedLimit: 4,
+        devicesLimit: 1,
+        isActive: true,
+        description: 'Accès basique offert financé par un court message sponsorisé.',
+        features: ['45 minutes incluses', '1 appareil connecté', 'Navigation web & emails']
+      },
+      {
+        id: 'plan-cowork-day',
+        name: 'Pass Journée & Coworking',
+        duration: 1440,
+        price: 8.0,
+        badge: 'Recommandé',
+        isAdSupported: false,
+        downloadSpeedLimit: 80,
+        uploadSpeedLimit: 35,
+        devicesLimit: 3,
+        isActive: true,
+        description: 'Idéal pour une journée de télétravail productive ou un séjour pro.',
+        features: ['24H illimitées sans coupure', 'Fibre très haut débit (80 Mbps)', 'Jusqu\'à 3 appareils (PC + mobile)']
+      },
+      {
+        id: 'plan-cowork-week',
+        name: 'Pass Semaine Résident',
+        duration: 10080, // 7 days
+        price: 32.0,
+        badge: 'Pro Nomade',
+        isAdSupported: false,
+        downloadSpeedLimit: 120,
+        uploadSpeedLimit: 50,
+        devicesLimit: 5,
+        isActive: true,
+        description: 'Accès premium 7 jours complets pour résidents et coworkers.',
+        features: ['7 jours consécutifs', '5 appareils simultanés', 'Streaming 4K & visio HD prioritaires']
+      }
+    ]
+  },
+  {
+    id: 'festival-event',
+    name: 'Festival & Event',
+    description: 'Conçu pour grands événements, foires, salons et festivals avec forte densité.',
+    icon: '🎪',
+    plans: [
+      {
+        id: 'plan-fest-sponsor',
+        name: 'Pass Festivalier Sponsor',
+        duration: 60,
+        price: 0,
+        badge: 'Gratuit',
+        isAdSupported: true,
+        downloadSpeedLimit: 15,
+        uploadSpeedLimit: 5,
+        devicesLimit: 1,
+        isActive: true,
+        description: '1 heure d\'accès offerte après visualisation d\'un sponsor partenaire.',
+        features: ['60 minutes de connexion', 'Financé par sponsors officiels', 'Idéal réseaux sociaux & messages']
+      },
+      {
+        id: 'plan-fest-daypass',
+        name: 'Pass Live Event (1 Jour)',
+        duration: 1440,
+        price: 4.5,
+        badge: 'Populaire',
         isAdSupported: false,
         downloadSpeedLimit: 50,
         uploadSpeedLimit: 25,
         devicesLimit: 2,
         isActive: true,
-        description: 'Parfait pour un rendez-vous ou une session de travail courte.',
-        features: ['2 heures d\'accès haut débit', 'Fibre 50 Mbps', 'Sécurisé WPA3']
+        description: 'Bande passante garantie même en zone de foule dense.',
+        features: ['24H sans publicité', 'Bande passante prioritaire QOS', 'Partage photo & story en direct']
       },
       {
-        id: 'plan-cowork-day',
-        name: 'Pass Day Worker',
-        duration: 1440,
+        id: 'plan-fest-vip',
+        name: 'Pass VIP & Presse (3 Jours)',
+        duration: 4320, // 3 days
         price: 12.0,
-        badge: 'Recommandé',
+        badge: 'VIP Ultra',
         isAdSupported: false,
         downloadSpeedLimit: 100,
         uploadSpeedLimit: 50,
-        devicesLimit: 3,
-        isActive: true,
-        description: 'Une journée productive sans limite de débit.',
-        features: ['Accès 24 heures illimité', 'Fibre 100 Mbps symétrique', 'PC portable + Smartphone']
-      },
-      {
-        id: 'plan-cowork-week',
-        name: 'Pass Semaine Nomade',
-        duration: 10080, // 7 days
-        price: 45.0,
-        badge: 'Pro Nomade',
-        isAdSupported: false,
-        downloadSpeedLimit: 150,
-        uploadSpeedLimit: 75,
         devicesLimit: 4,
         isActive: true,
-        description: '7 jours d\'accès complet pour les professionnels en déplacement.',
-        features: ['7 jours consécutifs', '4 appareils simultanés', 'IP dédiée & support prioritaire']
-      }
-    ]
-  },
-  {
-    id: 'hotel',
-    name: 'Hôtel & Résidence',
-    description: 'Pour hébergements touristiques, séjours d\'affaires et resorts.',
-    icon: '🏨',
-    plans: [
-      {
-        id: 'plan-hotel-free',
-        name: 'Wi-Fi Résident Basique',
-        duration: 1440,
-        price: 0,
-        badge: 'Inclus',
-        isAdSupported: true,
-        downloadSpeedLimit: 8,
-        uploadSpeedLimit: 2,
-        devicesLimit: 1,
-        isActive: true,
-        description: 'Connexion de base pour navigation web et messages.',
-        features: ['Inclus avec le séjour', 'Débit standard 8 Mbps', '1 appareil']
-      },
-      {
-        id: 'plan-hotel-premium-day',
-        name: 'Pass 24H Ultra-Stream',
-        duration: 1440,
-        price: 6.0,
-        badge: 'Streaming HD',
-        isAdSupported: false,
-        downloadSpeedLimit: 80,
-        uploadSpeedLimit: 30,
-        devicesLimit: 3,
-        isActive: true,
-        description: 'Pour Netflix, YouTube 4K, appels vidéo et gaming.',
-        features: ['24H très haut débit 80 Mbps', 'Sans restriction de bande passante', '3 appareils autorisés']
-      },
-      {
-        id: 'plan-hotel-week',
-        name: 'Pass Séjour Vacances (7J)',
-        duration: 10080,
-        price: 25.0,
-        badge: 'Pack Famille',
-        isAdSupported: false,
-        downloadSpeedLimit: 100,
-        uploadSpeedLimit: 40,
-        devicesLimit: 5,
-        isActive: true,
-        description: 'Valable pour toute la chambre et toute la famille.',
-        features: ['7 jours d\'accès continu', 'Jusqu\'à 5 appareils connectés', 'Streaming 4K garanti']
+        description: 'Pass 3 jours non-stop haute vitesse pour staff, exposants et VIPs.',
+        features: ['Pass 3 jours du festival', 'Débit prioritaire 100 Mbps', 'Jusqu\'à 4 appareils connectés']
       }
     ]
   }
