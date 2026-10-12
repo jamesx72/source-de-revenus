@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, X, Download, FileText, Printer } from 'lucide-react';
+import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, AlertTriangle, Clock, RefreshCw, Bell, X, Download, FileText, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -62,53 +62,121 @@ function CheckoutForm({ duration }: { duration: number }) {
   );
 }
 
-function CountdownTimer({ timeLeft, maxTime }: { timeLeft: number | null, maxTime: number }) {
+interface CountdownTimerProps {
+  timeLeft: number | null;
+  maxTime: number;
+  onExtend?: () => void;
+  isProcessing?: boolean;
+}
+
+function CountdownTimer({ timeLeft, maxTime, onExtend, isProcessing }: CountdownTimerProps) {
   const { t } = useLanguage();
   if (timeLeft === null) return null;
-  const percentage = Math.max(0, Math.min(100, (timeLeft / maxTime) * 100));
+  const percentage = Math.max(0, Math.min(100, (timeLeft / (maxTime || 1)) * 100));
   
   const format = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
     if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const isExpired = timeLeft === 0;
+  const isCritical = timeLeft <= 60 && timeLeft > 0;
+  const isWarning = timeLeft <= 300 && timeLeft > 60;
 
   const circumference = 88 * 2 * Math.PI;
 
   return (
-    <div className="relative w-48 h-48 mx-auto flex items-center justify-center mb-6">
-      <svg className="absolute inset-0 w-full h-full transform -rotate-90">
-        <circle
-          className="text-slate-200 dark:text-white/10"
-          strokeWidth="8"
-          stroke="currentColor"
-          fill="transparent"
-          r="88"
-          cx="96"
-          cy="96"
-        />
-        <motion.circle
-          className="text-indigo-500"
-          strokeWidth="8"
-          strokeDasharray={circumference}
-          strokeLinecap="round"
-          stroke="currentColor"
-          fill="transparent"
-          r="88"
-          cx="96"
-          cy="96"
-          initial={{ strokeDashoffset: circumference }}
-          animate={{ strokeDashoffset: circumference * (1 - percentage / 100) }}
-          transition={{ duration: 1, ease: "linear" }}
-        />
-      </svg>
-      <div className="flex flex-col items-center justify-center">
-        <p className="text-4xl font-bold text-slate-900 dark:text-white font-mono tracking-tight">
-          {format(timeLeft)}
-        </p>
-        <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">{t('portal.remaining')}</p>
+    <div className="flex flex-col items-center mb-6">
+      {/* Dynamic Status Badge */}
+      <div className="mb-3">
+        {isExpired ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+            <span className="w-2 h-2 rounded-full bg-rose-500" />
+            {t('portal.status_expired')}
+          </span>
+        ) : isCritical ? (
+          <motion.span 
+            animate={{ scale: [1, 1.06, 1] }} 
+            transition={{ repeat: Infinity, duration: 0.9 }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 shadow-sm"
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+            <AlertTriangle size={13} className="text-rose-500" />
+            <span>{t('portal.status_critical')} ({timeLeft}s)</span>
+          </motion.span>
+        ) : isWarning ? (
+          <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <Clock size={13} className="text-amber-500" />
+            <span>{t('portal.status_expiring')}</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span>{t('portal.status_active')}</span>
+          </span>
+        )}
+      </div>
+
+      {/* Circular Progress Gauge */}
+      <div className="relative w-48 h-48 mx-auto flex items-center justify-center">
+        <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+          <circle
+            className="text-slate-200 dark:text-white/10"
+            strokeWidth="8"
+            stroke="currentColor"
+            fill="transparent"
+            r="88"
+            cx="96"
+            cy="96"
+          />
+          <motion.circle
+            className={`transition-colors duration-500 ${
+              isExpired 
+                ? 'text-rose-400/40' 
+                : isCritical 
+                ? 'text-rose-500 drop-shadow-[0_0_8px_rgba(244,63,94,0.6)]' 
+                : isWarning 
+                ? 'text-amber-500 drop-shadow-[0_0_8px_rgba(245,158,11,0.5)]' 
+                : 'text-indigo-500'
+            }`}
+            strokeWidth="8"
+            strokeDasharray={circumference}
+            strokeLinecap="round"
+            stroke="currentColor"
+            fill="transparent"
+            r="88"
+            cx="96"
+            cy="96"
+            initial={{ strokeDashoffset: circumference }}
+            animate={{ strokeDashoffset: circumference * (1 - percentage / 100) }}
+            transition={{ duration: 1, ease: "linear" }}
+          />
+        </svg>
+
+        <div className="flex flex-col items-center justify-center z-10">
+          <motion.p 
+            animate={isCritical ? { scale: [1, 1.05, 1] } : {}}
+            transition={{ repeat: Infinity, duration: 0.9 }}
+            className={`text-4xl font-bold font-mono tracking-tight transition-colors ${
+              isExpired 
+                ? 'text-slate-400 dark:text-slate-500' 
+                : isCritical 
+                ? 'text-rose-600 dark:text-rose-400' 
+                : isWarning 
+                ? 'text-amber-600 dark:text-amber-400' 
+                : 'text-slate-900 dark:text-white'
+            }`}
+          >
+            {format(timeLeft)}
+          </motion.p>
+          <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">
+            {isExpired ? t('portal.status_expired') : t('portal.remaining')}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -605,36 +673,148 @@ export default function CaptivePortal() {
 
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [maxTime, setMaxTime] = useState<number>(0);
-  const [hasShownExpiryWarning, setHasShownExpiryWarning] = useState(false);
+  const [hasShown5MinWarning, setHasShown5MinWarning] = useState(false);
+  const [hasShown1MinWarning, setHasShown1MinWarning] = useState(false);
   const [showExpiryWarning, setShowExpiryWarning] = useState(false);
+  const [showExpiredModal, setShowExpiredModal] = useState(false);
 
+  // Load from or save to localStorage for persistent session timing across refreshes
   useEffect(() => {
-    if (step === 'success') {
-      if (timeLeft === null) {
-        setTimeLeft(sessionDuration * 60);
-        setMaxTime(sessionDuration * 60);
+    const storageKey = `wificash_session_${locationId || 'default'}`;
+    if (step === 'success' || step === 'payment_success') {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          const remaining = Math.max(0, Math.floor((parsed.expiresAt - Date.now()) / 1000));
+          if (remaining > 0) {
+            setTimeLeft(remaining);
+            setMaxTime(parsed.maxTime || (sessionDuration * 60));
+            return;
+          }
+        } catch (e) {
+          console.error("Failed to parse cached session:", e);
+        }
       }
-    } else if (step === 'payment_success') {
-      // Premium 120 minutes
-      setTimeLeft(120 * 60); 
-      setMaxTime(120 * 60);
-    }
-  }, [step, sessionDuration]);
 
+      const totalSec = step === 'payment_success' ? 120 * 60 : (sessionDuration * 60);
+      setTimeLeft(totalSec);
+      setMaxTime(totalSec);
+      localStorage.setItem(storageKey, JSON.stringify({
+        expiresAt: Date.now() + totalSec * 1000,
+        maxTime: totalSec,
+        startedAt: Date.now()
+      }));
+    }
+  }, [step, sessionDuration, locationId]);
+
+  // Accurate ticking countdown with threshold alerts
   useEffect(() => {
-    if (timeLeft === null || timeLeft <= 0) return;
+    if (timeLeft === null || timeLeft <= 0) {
+      if (timeLeft === 0 && (step === 'success' || step === 'payment_success')) {
+        setShowExpiryWarning(false);
+        setShowExpiredModal(true);
+        const storageKey = `wificash_session_${locationId || 'default'}`;
+        localStorage.removeItem(storageKey);
+      }
+      return;
+    }
+
     const interval = setInterval(() => {
-      setTimeLeft(prev => prev !== null && prev > 0 ? prev - 1 : 0);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [timeLeft]);
+      setTimeLeft(prev => {
+        if (prev === null || prev <= 0) return 0;
+        const nextVal = prev - 1;
+        
+        // 5-minute warning notification
+        if (nextVal === 300 && !hasShown5MinWarning) {
+          setShowExpiryWarning(true);
+          setHasShown5MinWarning(true);
+          toast.warning(t('portal.session_expiry_title'), {
+            description: t('portal.session_expiry_msg'),
+            duration: 8000
+          });
+        }
+        
+        // 1-minute critical warning notification
+        if (nextVal === 60 && !hasShown1MinWarning) {
+          setShowExpiryWarning(true);
+          setHasShown1MinWarning(true);
+          toast.error(t('portal.session_critical_title'), {
+            description: t('portal.session_critical_msg'),
+            duration: 8000
+          });
+        }
 
+        return nextVal;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timeLeft, step, hasShown5MinWarning, hasShown1MinWarning, locationId, t]);
+
+  // Initial trigger if timer starts under 300 seconds
   useEffect(() => {
-    if (timeLeft !== null && timeLeft <= 300 && timeLeft > 0 && !hasShownExpiryWarning) {
+    if (timeLeft !== null && timeLeft <= 300 && timeLeft > 60 && !hasShown5MinWarning) {
       setShowExpiryWarning(true);
-      setHasShownExpiryWarning(true);
+      setHasShown5MinWarning(true);
+      toast.warning(t('portal.session_expiry_title'), { description: t('portal.session_expiry_msg') });
+    } else if (timeLeft !== null && timeLeft <= 60 && timeLeft > 0 && !hasShown1MinWarning) {
+      setShowExpiryWarning(true);
+      setHasShown1MinWarning(true);
+      toast.error(t('portal.session_critical_title'), { description: t('portal.session_critical_msg') });
     }
-  }, [timeLeft, hasShownExpiryWarning]);
+  }, [timeLeft, hasShown5MinWarning, hasShown1MinWarning, t]);
+
+  const handleExtendSession = async () => {
+    setIsProcessingPayment(true);
+    try {
+      const additionalSeconds = 7200; // +2 hours
+      const newRemaining = (timeLeft || 0) + additionalSeconds;
+      const newMax = Math.max(maxTime, newRemaining);
+      
+      setTimeLeft(newRemaining);
+      setMaxTime(newMax);
+      setHasShown5MinWarning(false);
+      setHasShown1MinWarning(false);
+      setShowExpiryWarning(false);
+      setShowExpiredModal(false);
+
+      const storageKey = `wificash_session_${locationId || 'default'}`;
+      localStorage.setItem(storageKey, JSON.stringify({
+        expiresAt: Date.now() + newRemaining * 1000,
+        maxTime: newMax,
+        updatedAt: Date.now()
+      }));
+
+      toast.success(t('portal.premium_extension') + ' (+2h) !');
+    } catch (err) {
+      toast.error(t('portal.error_occurred'));
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
+
+  const handleSimulateTime = (seconds: number) => {
+    setTimeLeft(seconds);
+    if (seconds <= 60 && seconds > 0) {
+      setShowExpiryWarning(true);
+      setHasShown1MinWarning(true);
+      toast.error(t('portal.session_critical_title'), { description: t('portal.session_critical_msg') });
+    } else if (seconds <= 300 && seconds > 0) {
+      setShowExpiryWarning(true);
+      setHasShown5MinWarning(true);
+      toast.warning(t('portal.session_expiry_title'), { description: t('portal.session_expiry_msg') });
+    } else if (seconds === 0) {
+      setShowExpiryWarning(false);
+      setShowExpiredModal(true);
+      toast.error(t('portal.session_expired_title'), { description: t('portal.session_expired_msg') });
+    } else {
+      setShowExpiryWarning(false);
+      setShowExpiredModal(false);
+      setHasShown5MinWarning(false);
+      setHasShown1MinWarning(false);
+    }
+  };
 
   const getDisplayPrice = (baseCents: number) => {
     if (baseCents <= 0) return t('portal.free_badge');
@@ -1074,17 +1254,73 @@ export default function CaptivePortal() {
                 <p className="text-indigo-200 font-medium px-4 relative z-10 text-sm">{t('portal.internet_access')}</p>
                 
                 {sessionDuration > 0 && (
-                  <div className="mt-8 mb-6 p-6 w-full relative z-10 flex flex-col items-center">
-                    <CountdownTimer timeLeft={timeLeft} maxTime={maxTime} />
+                  <div className="mt-4 mb-4 p-4 w-full relative z-10 flex flex-col items-center">
+                    {/* Compact notification bar if dismissed during warning window */}
+                    {!showExpiryWarning && timeLeft !== null && timeLeft <= 300 && timeLeft > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => setShowExpiryWarning(true)}
+                        className={`w-full mb-3 px-3 py-2 rounded-xl flex items-center justify-between text-xs cursor-pointer border shadow-sm transition-all ${
+                          timeLeft <= 60 
+                            ? 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400' 
+                            : 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <span className="w-2 h-2 rounded-full bg-current animate-ping" />
+                          <AlertTriangle size={13} />
+                          <span>{timeLeft <= 60 ? t('portal.status_critical') : t('portal.status_expiring')} : {formatTime(timeLeft)}</span>
+                        </div>
+                        <span className="font-semibold underline ml-2">{t('portal.extend_session')}</span>
+                      </motion.div>
+                    )}
+
+                    <CountdownTimer 
+                      timeLeft={timeLeft} 
+                      maxTime={maxTime} 
+                      onExtend={handleExtendSession}
+                      isProcessing={isProcessingPayment}
+                    />
                     
                     <button 
-                      onClick={() => handleCheckout(200, "Extension Premium 2 Heures")}
+                      onClick={handleExtendSession}
                       disabled={isProcessingPayment}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 rounded-xl transition-colors font-medium border border-indigo-100 dark:border-indigo-500/20"
+                      className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 rounded-xl transition-all font-semibold border border-indigo-100 dark:border-indigo-500/20 shadow-sm active:scale-95 disabled:opacity-50"
                     >
+                      <Sparkles size={16} />
                       <span>{t('portal.premium_extension')} (+2 {t('portal.hours')}) - 2.00 €</span>
                       {isProcessingPayment && <div className="w-4 h-4 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>}
                     </button>
+
+                    {/* Simulation Controls for testing countdown and alerts */}
+                    <div className="mt-3 w-full flex items-center justify-center gap-1.5 text-[10px] text-slate-400 pt-1 border-t border-slate-100 dark:border-white/5">
+                      <span className="font-medium">Test:</span>
+                      <button 
+                        onClick={() => handleSimulateTime(299)} 
+                        className="px-2 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-semibold transition-colors"
+                      >
+                        5 min
+                      </button>
+                      <button 
+                        onClick={() => handleSimulateTime(50)} 
+                        className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-semibold transition-colors"
+                      >
+                        50s
+                      </button>
+                      <button 
+                        onClick={() => handleSimulateTime(0)} 
+                        className="px-2 py-0.5 rounded bg-slate-500/10 hover:bg-slate-500/20 text-slate-600 dark:text-slate-300 font-semibold transition-colors"
+                      >
+                        0s
+                      </button>
+                      <button 
+                        onClick={() => handleSimulateTime(sessionDuration * 60)} 
+                        className="px-2 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-semibold transition-colors"
+                      >
+                        Reset
+                      </button>
+                    </div>
                   </div>
                 )}
                 
@@ -1098,38 +1334,94 @@ export default function CaptivePortal() {
                   </button>
                 )}
 
+                {/* Expiry Warning Notification Banner / Modal */}
                 <AnimatePresence>
-                  {showExpiryWarning && (
+                  {showExpiryWarning && timeLeft !== null && timeLeft > 0 && (
                     <motion.div 
                       initial={{ opacity: 0, y: 50, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 20, scale: 0.95 }}
-                      className="absolute bottom-4 left-4 right-4 bg-amber-500 text-white rounded-2xl p-5 shadow-2xl z-50 flex flex-col gap-3"
+                      className={`absolute bottom-4 left-4 right-4 text-white rounded-2xl p-5 shadow-2xl z-50 flex flex-col gap-3 backdrop-blur-md border ${
+                        timeLeft <= 60 
+                          ? 'bg-gradient-to-br from-rose-600 to-rose-700 border-rose-400/40 shadow-rose-600/30' 
+                          : 'bg-gradient-to-br from-amber-500 to-amber-600 border-amber-300/40 shadow-amber-500/30'
+                      }`}
                     >
                       <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2 font-bold text-lg">
-                           <AlertCircle size={20} />
-                           {t('portal.session_expiry_title')}
+                        <div className="flex items-center gap-2 font-bold text-base sm:text-lg">
+                           <AlertTriangle size={20} className={timeLeft <= 60 ? "animate-bounce" : ""} />
+                           <span>
+                             {timeLeft <= 60 ? t('portal.session_critical_title') : t('portal.session_expiry_title')}
+                           </span>
                         </div>
                         <button onClick={() => setShowExpiryWarning(false)} className="p-1 hover:bg-black/10 rounded-lg transition-colors">
                           <X size={18} />
                         </button>
                       </div>
-                      <p className="text-sm font-medium text-amber-50 leading-snug text-left">
-                        {t('portal.session_expiry_msg')}
+
+                      <div className="flex items-center justify-between text-xs bg-black/20 p-2.5 rounded-xl font-mono">
+                        <span className="text-white/80">{t('portal.time_remaining')} :</span>
+                        <span className="font-bold text-sm text-white">{formatTime(timeLeft)}</span>
+                      </div>
+
+                      <p className="text-xs sm:text-sm font-medium text-white/90 leading-snug text-left">
+                        {timeLeft <= 60 ? t('portal.session_critical_msg') : t('portal.session_expiry_msg')}
                       </p>
                       
                       <button 
-                        onClick={() => {
-                           setShowExpiryWarning(false);
-                           handleCheckout(200, "Extension Premium 2 Heures");
-                        }}
+                        onClick={handleExtendSession}
                         disabled={isProcessingPayment}
-                        className="mt-2 w-full py-3 bg-white text-amber-600 font-bold rounded-xl shadow-sm hover:bg-amber-50 transition-colors flex items-center justify-center gap-2 active:scale-95"
+                        className={`mt-1 w-full py-3 font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                          timeLeft <= 60 
+                            ? 'bg-white text-rose-600 hover:bg-rose-50 shadow-rose-900/20' 
+                            : 'bg-white text-amber-600 hover:bg-amber-50 shadow-amber-900/20'
+                        }`}
                       >
+                        <Sparkles size={16} />
                         <span>{t('portal.extend_session')}</span>
-                        {isProcessingPayment && <div className="w-4 h-4 border-2 border-amber-600/30 border-t-amber-600 rounded-full animate-spin"></div>}
+                        {isProcessingPayment && <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div>}
                       </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Session Expired Overlay */}
+                <AnimatePresence>
+                  {(showExpiredModal || timeLeft === 0) && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="absolute inset-x-4 bottom-4 z-50 bg-slate-900/95 dark:bg-black/95 text-white rounded-3xl p-6 shadow-2xl border border-rose-500/40 backdrop-blur-xl flex flex-col items-center text-center gap-4"
+                    >
+                      <div className="w-14 h-14 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center">
+                        <AlertTriangle size={30} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-lg text-white">{t('portal.session_expired_title')}</h3>
+                        <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">{t('portal.session_expired_msg')}</p>
+                      </div>
+                      <div className="w-full flex flex-col gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            setShowExpiredModal(false);
+                            setTimeLeft(null);
+                            setStep('home');
+                          }}
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-indigo-600/30"
+                        >
+                          <RefreshCw size={15} />
+                          <span>{t('portal.reconnect')}</span>
+                        </button>
+                        <button
+                          onClick={handleExtendSession}
+                          disabled={isProcessingPayment}
+                          className="w-full py-2.5 bg-white/10 hover:bg-white/15 text-white font-semibold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <Sparkles size={13} />
+                          <span>{t('portal.extend_session')}</span>
+                        </button>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
