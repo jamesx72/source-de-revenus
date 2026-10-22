@@ -39,10 +39,16 @@
       "properties": {
         "code": { "type": "string" },
         "duration": { "type": "string" },
+        "durationMinutes": { "type": "number", "nullable": true },
         "locationId": { "type": "string" },
-        "status": { "type": "string", "enum": ["active", "used", "revoked"] },
+        "status": { "type": "string", "enum": ["active", "used", "revoked", "expired"] },
         "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string", "nullable": true },
         "usedAt": { "type": "string", "nullable": true },
+        "usedByMac": { "type": "string", "nullable": true },
+        "speedLimit": { "type": "string", "nullable": true },
+        "dataLimit": { "type": "string", "nullable": true },
+        "note": { "type": "string", "nullable": true },
         "createdBy": { "type": "string" }
       },
       "required": ["code", "duration", "locationId", "status", "createdAt", "createdBy"]

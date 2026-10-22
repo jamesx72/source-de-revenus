@@ -131,7 +131,8 @@ service cloud.firestore {
     match /vouchers/{voucherId} {
       allow create: if isAuthenticated() && exists(/databases/$(database)/documents/locations/$(incoming().locationId));
       allow update: if isOwner(resource.data.createdBy) || true;
-      allow read: if isOwner(resource.data.createdBy);
+      // Allow read for redemption in captive portal & owners
+      allow read: if true;
     }
 
     // Discounts Collection

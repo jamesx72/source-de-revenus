@@ -841,10 +841,212 @@ async function startServer() {
     }
   });
 
+  // Activate platform subscription directly (for Stripe fallback, PayPal, and Crypto Solana)
+  app.post("/api/activate-platform-subscription", async (req, res) => {
+    try {
+      const { userId, gateway, priceId, plan = 'business' } = req.body;
+      if (!userId) {
+        return res.status(400).json({ error: "missing userId" });
+      }
+
+      const currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const gatewayType = gateway || 'stripe';
+      const finalPriceId = priceId || (gatewayType === 'stripe' ? 'price_1P0XWiFiCashBusiness49' : gatewayType === 'paypal' ? 'P-5ML4271244454362WXNWU5NQ' : '7XwPz4WiFiCashMerchantHubSolanaNetworkAddress9');
+
+      let docId = `sub_${Date.now()}`;
+      if (db) {
+        // Cancel any previous active subscriptions for this user
+        const existingSubs = await db.collection('subscriptions').where('userId', '==', userId).where('status', '==', 'active').get();
+        for (const doc of existingSubs.docs) {
+          await doc.ref.update({ status: 'canceled', updatedAt: new Date().toISOString() });
+        }
+
+        const newDocRef = await db.collection('subscriptions').add({
+          userId,
+          status: 'active',
+          plan,
+          gateway: gatewayType,
+          priceId: finalPriceId,
+          amount: gatewayType === 'solana' ? 0.35 : 49,
+          currency: gatewayType === 'solana' ? 'SOL' : 'EUR',
+          currentPeriodEnd,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+        docId = newDocRef.id;
+      }
+
+      res.json({
+        success: true,
+        subscriptionId: docId,
+        status: 'active',
+        plan,
+        gateway: gatewayType,
+        priceId: finalPriceId,
+        currentPeriodEnd
+      });
+    } catch (err: any) {
+      console.error("Error activating platform subscription:", err);
+      res.status(500).json({ error: err.message || "Failed to activate subscription" });
+    }
+  });
+
+  // Cancel platform subscription
+  app.post("/api/cancel-platform-subscription", async (req, res) => {
+    try {
+      const { userId, subscriptionId } = req.body;
+      if (db) {
+        if (subscriptionId) {
+          await db.collection('subscriptions').doc(subscriptionId).update({
+            status: 'canceled',
+            updatedAt: new Date().toISOString()
+          });
+        } else if (userId) {
+          const snapshot = await db.collection('subscriptions').where('userId', '==', userId).where('status', '==', 'active').get();
+          for (const doc of snapshot.docs) {
+            await doc.ref.update({ status: 'canceled', updatedAt: new Date().toISOString() });
+          }
+        }
+      }
+      res.json({ success: true, status: 'canceled' });
+    } catch (err: any) {
+      console.error("Error canceling platform subscription:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Secure Voucher Redemption Endpoint
+  app.post("/api/redeem-voucher", async (req, res) => {
+    try {
+      const { code, locationId, clientMac, clientDevice } = req.body;
+      if (!code) {
+        return res.status(400).json({ error: "Veuillez saisir un code voucher." });
+      }
+
+      const cleanCode = String(code).trim().toUpperCase();
+
+      if (!db) {
+        return res.json({
+          success: true,
+          code: cleanCode,
+          durationMinutes: 60,
+          durationLabel: "1 heure",
+          message: "Code voucher validé avec succès."
+        });
+      }
+
+      const vouchersRef = db.collection('vouchers');
+      const snapshot = await vouchersRef.where('code', '==', cleanCode).limit(1).get();
+
+      if (snapshot.empty) {
+        return res.status(404).json({ error: "Code voucher introuvable ou invalide." });
+      }
+
+      const voucherDoc = snapshot.docs[0];
+      const voucher = voucherDoc.data();
+
+      // Check status
+      if (voucher.status === 'used') {
+        const usedDate = voucher.usedAt ? new Date(voucher.usedAt).toLocaleString('fr-FR') : '';
+        return res.status(400).json({ 
+          error: `Ce voucher a déjà été utilisé${usedDate ? ' le ' + usedDate : ''}.` 
+        });
+      }
+
+      if (voucher.status === 'revoked') {
+        return res.status(400).json({ error: "Ce voucher a été révoqué par l'administrateur." });
+      }
+
+      if (voucher.status === 'expired') {
+        return res.status(400).json({ error: "Ce voucher a expiré." });
+      }
+
+      // Check optional expiration date if set
+      if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() < Date.now()) {
+        await voucherDoc.ref.update({ status: 'expired' });
+        return res.status(400).json({ error: "Ce voucher a expiré." });
+      }
+
+      // Check location restriction if specified
+      if (voucher.locationId && voucher.locationId !== 'all' && locationId && voucher.locationId !== locationId) {
+        return res.status(400).json({ error: "Ce voucher n'est pas utilisable dans cet établissement." });
+      }
+
+      // Calculate duration in minutes
+      let durationMinutes = 60; // default 1 hour
+      const dStr = String(voucher.duration || '1h').toLowerCase();
+      if (voucher.durationMinutes && Number(voucher.durationMinutes) > 0) {
+        durationMinutes = Number(voucher.durationMinutes);
+      } else if (dStr.includes('30m') || dStr.includes('30 min')) {
+        durationMinutes = 30;
+      } else if (dStr === '1h' || dStr.includes('1 heure') || dStr === '60') {
+        durationMinutes = 60;
+      } else if (dStr === '2h' || dStr.includes('2 heure') || dStr === '120') {
+        durationMinutes = 120;
+      } else if (dStr === '4h' || dStr === '240') {
+        durationMinutes = 240;
+      } else if (dStr === '8h' || dStr === '480') {
+        durationMinutes = 480;
+      } else if (dStr === '24h' || dStr.includes('jour') || dStr === '1440') {
+        durationMinutes = 1440;
+      } else if (dStr === '7d' || dStr.includes('semaine') || dStr === '10080') {
+        durationMinutes = 10080;
+      } else {
+        const parsed = parseInt(dStr);
+        if (!isNaN(parsed) && parsed > 0) {
+          durationMinutes = parsed;
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+
+      // Mark voucher as used in Firestore
+      await voucherDoc.ref.update({
+        status: 'used',
+        usedAt: nowIso,
+        usedByMac: clientMac || 'guest-mac',
+        usedByDevice: clientDevice || 'Appareil Client',
+        updatedAt: nowIso
+      });
+
+      // Log session in connections collection
+      await db.collection('connections').add({
+        locationId: voucher.locationId === 'all' ? (locationId || 'global') : voucher.locationId,
+        locationName: voucher.locationName || 'Wi-Fi Hotspot',
+        userId: voucher.createdBy || null,
+        device: clientDevice || 'Appareil Client',
+        duration: durationMinutes,
+        connectedAt: nowIso,
+        status: 'Connecté',
+        paymentStatus: 'voucher',
+        voucherCode: cleanCode,
+        speedLimit: voucher.speedLimit || null,
+        dataLimit: voucher.dataLimit || null
+      });
+
+      res.json({
+        success: true,
+        code: cleanCode,
+        durationMinutes,
+        speedLimit: voucher.speedLimit || null,
+        dataLimit: voucher.dataLimit || null,
+        voucher: {
+          id: voucherDoc.id,
+          ...voucher,
+          status: 'used',
+          usedAt: nowIso
+        }
+      });
+    } catch (err: any) {
+      console.error("Voucher redemption error:", err);
+      res.status(500).json({ error: err.message || "Erreur lors de la validation du voucher." });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
+      server: { middlewareMode: true, hmr: false, watch: null },
       appType: "spa",
     });
     app.use(vite.middlewares);

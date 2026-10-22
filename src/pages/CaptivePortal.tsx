@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, AlertTriangle, Clock, RefreshCw, Bell, X, Download, FileText, Printer } from 'lucide-react';
+import { Wifi, PlayCircle, CreditCard, Facebook, ShieldCheck, CheckCircle2, ChevronLeft, Smartphone, Sparkles, Star, AlertCircle, AlertTriangle, Clock, RefreshCw, Bell, X, Download, FileText, Printer, DollarSign, Coins, Copy, Check, Ticket, Key } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -10,6 +10,8 @@ import { doc, getDoc, collection, addDoc, serverTimestamp } from 'firebase/fires
 import { GoogleAuthProvider, FacebookAuthProvider, signInWithPopup } from 'firebase/auth';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { QRCodeSVG } from 'qrcode.react';
+import { getStoredGatewaysConfig, PaymentGatewaysConfig } from '../components/PaymentGatewaysSettings';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
 import { WifiReceipt } from '../types';
@@ -207,12 +209,75 @@ export default function CaptivePortal() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [portalPaymentGateway, setPortalPaymentGateway] = useState<'card' | 'paypal' | 'solana'>('card');
+  const [portalPaymentMethodUsed, setPortalPaymentMethodUsed] = useState<string>('Carte Bancaire (Stripe)');
+  const [portalGatewaysConfig] = useState<PaymentGatewaysConfig>(getStoredGatewaysConfig);
+  const [solanaCopied, setSolanaCopied] = useState(false);
+
+  const handleDirectPortalPaymentSuccess = async (method: string, gatewayKey?: string) => {
+    setIsProcessingPayment(true);
+    try {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      setPaymentCode(code);
+      setPortalPaymentMethodUsed(method);
+
+      try {
+        const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        const ua = navigator.userAgent;
+        let os = "Inconnu";
+        let deviceType = "Appareil";
+        if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+        else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+        else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+        if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+        else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+        else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
+
+        await addDoc(collection(db, 'connections'), {
+          locationId,
+          locationName: locationName || 'WiFiCash Hotspot',
+          userId: locationOwnerId,
+          device: deviceType,
+          os,
+          duration: selectedDuration || 120,
+          connectedAt: serverTimestamp(),
+          status: 'Connecté',
+          paymentStatus: 'paid',
+          paymentMethod: method,
+          code
+        });
+      } catch (e) {
+        console.warn("Connection log warning:", e);
+      }
+
+      setStep('payment_success');
+      toast.success(`Paiement validé via ${method} ! Accès Wi-Fi activé.`);
+    } catch (err: any) {
+      toast.error("Erreur lors de la validation du paiement.");
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  };
 
   // Promo code feature
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<any>(null);
   const [promoError, setPromoError] = useState('');
   const [isApplyingPromo, setIsApplyingPromo] = useState(false);
+
+  // Secure Voucher Redemption feature
+  const [voucherCodeInput, setVoucherCodeInput] = useState(() => (searchParams.get('code') || '').toUpperCase());
+  const [isRedeemingVoucher, setIsRedeemingVoucher] = useState(false);
+  const [voucherRedeemError, setVoucherRedeemError] = useState('');
+
+  // Keep voucher input in sync with URL ?code=...
+  useEffect(() => {
+    const urlCode = searchParams.get('code');
+    if (urlCode && !voucherCodeInput) {
+      setVoucherCodeInput(urlCode.toUpperCase());
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -480,6 +545,70 @@ export default function CaptivePortal() {
     }
   };
 
+  const handleRedeemVoucher = async (codeToUse?: string) => {
+    const code = (codeToUse || voucherCodeInput).trim().toUpperCase();
+    if (!code) {
+      setVoucherRedeemError("Veuillez saisir votre code voucher.");
+      toast.error("Veuillez saisir votre code voucher.");
+      return;
+    }
+
+    setIsRedeemingVoucher(true);
+    setVoucherRedeemError('');
+
+    try {
+      const res = await fetch('/api/redeem-voucher', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          locationId: locationId || 'all',
+          clientMac: 'guest-browser-client',
+          clientDevice: navigator.userAgent.includes('Mobile') ? 'Smartphone' : 'Ordinateur'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Code voucher invalide ou déjà utilisé.");
+      }
+
+      const durationMin = Number(data.durationMinutes) || 60;
+      const totalSec = durationMin * 60;
+      const passTitle = data.voucher?.duration || formatPassDuration(durationMin);
+
+      setPurchasedPass({
+        name: `Pass Voucher (${passTitle})`,
+        price: 0,
+        duration: durationMin
+      });
+      setPaymentCode(data.code);
+      setPortalPaymentMethodUsed("Code Voucher");
+
+      // Set accurate ticking session countdown
+      setTimeLeft(totalSec);
+      setMaxTime(totalSec);
+      const storageKey = `wificash_session_${locationId || 'default'}`;
+      localStorage.setItem(storageKey, JSON.stringify({
+        expiresAt: Date.now() + totalSec * 1000,
+        maxTime: totalSec,
+        startedAt: Date.now(),
+        voucherCode: data.code,
+        durationMinutes: durationMin
+      }));
+
+      setStep('payment_success');
+      toast.success(`Code voucher validé ! Accès Wi-Fi activé pour ${formatPassDuration(durationMin)}.`);
+    } catch (err: any) {
+      console.error("Voucher redemption error:", err);
+      const msg = err.message || "Erreur de validation du voucher.";
+      setVoucherRedeemError(msg);
+      toast.error(msg);
+    } finally {
+      setIsRedeemingVoucher(false);
+    }
+  };
+
   let sessionDuration = portalConfig?.sessionDuration !== undefined ? portalConfig.sessionDuration : 60;
   if (wifiConfig) {
     if (wifiConfig.timeLimit === 'unlimited') {
@@ -697,7 +826,10 @@ export default function CaptivePortal() {
         }
       }
 
-      const totalSec = step === 'payment_success' ? 120 * 60 : (sessionDuration * 60);
+      const effectiveMinutes = step === 'payment_success'
+        ? (purchasedPass?.duration || selectedDuration || 60)
+        : (sessionDuration > 0 ? sessionDuration : 60);
+      const totalSec = effectiveMinutes * 60;
       setTimeLeft(totalSec);
       setMaxTime(totalSec);
       localStorage.setItem(storageKey, JSON.stringify({
@@ -706,7 +838,7 @@ export default function CaptivePortal() {
         startedAt: Date.now()
       }));
     }
-  }, [step, sessionDuration, locationId]);
+  }, [step, sessionDuration, locationId, purchasedPass, selectedDuration]);
 
   // Accurate ticking countdown with threshold alerts
   useEffect(() => {
@@ -875,7 +1007,7 @@ export default function CaptivePortal() {
     voucherCode: paymentCode || 'DEMO-CODE-1234',
     discountCode: appliedPromo?.code,
     discountAmount: appliedPromo ? (appliedPromo.type === 'flat' ? appliedPromo.value : ((purchasedPass?.price || 2.0) * (appliedPromo.value / 100))) : undefined,
-    paymentMethod: 'Carte Bancaire (Stripe)',
+    paymentMethod: portalPaymentMethodUsed || 'Carte Bancaire (Stripe)',
     status: 'paid',
     createdAt: new Date().toISOString(),
   };
@@ -1041,6 +1173,49 @@ export default function CaptivePortal() {
                       )}
                     </div>
                   )}
+
+                  {/* Voucher Card for redeeming time-limited access codes (1-hour pass, etc.) */}
+                  <div className={`w-full mb-6 p-4 border border-indigo-200/70 dark:border-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/20 backdrop-blur-sm text-left ${layoutTheme === 'elegant' ? 'rounded-md' : 'rounded-2xl'}`}>
+                    <div className="flex items-center gap-2 mb-1.5 text-indigo-700 dark:text-indigo-300 font-semibold text-sm">
+                      <Ticket size={18} className="text-indigo-600 dark:text-indigo-400" />
+                      <span>Vous avez un code Voucher ?</span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                      Entrez votre code d'accès sécurisé (ex: Pass 1h, Pass 24h) pour débloquer votre connexion Internet.
+                    </p>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        value={voucherCodeInput}
+                        onChange={(e) => {
+                          setVoucherCodeInput(e.target.value.toUpperCase());
+                          setVoucherRedeemError('');
+                        }}
+                        placeholder="EX: VIP-A1B2C3"
+                        className="flex-1 px-3.5 py-2.5 bg-white dark:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-mono tracking-wider"
+                      />
+                      <button 
+                        onClick={() => handleRedeemVoucher()}
+                        disabled={isRedeemingVoucher || !voucherCodeInput.trim()}
+                        className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium text-sm disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/20 shrink-0"
+                      >
+                        {isRedeemingVoucher ? (
+                          <RefreshCw size={16} className="animate-spin" />
+                        ) : (
+                          <>
+                            <span>Valider</span>
+                            <CheckCircle2 size={16} />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {voucherRedeemError && (
+                      <p className="text-red-500 text-xs mt-2 flex items-center gap-1">
+                        <AlertCircle size={14} />
+                        <span>{voucherRedeemError}</span>
+                      </p>
+                    )}
+                  </div>
 
                   {portalConfig?.allowExtension && (
                     <div className="w-full mb-6">
@@ -1473,29 +1648,185 @@ export default function CaptivePortal() {
                 exit={{ opacity: 0, x: -20 }}
                 className="flex flex-col h-full bg-slate-50 dark:bg-[#050614] rounded-[2rem] overflow-hidden"
               >
-                <div className="p-6 relative z-10 bg-white/40 dark:bg-black/20 backdrop-blur-md border-b border-slate-200 dark:border-white/10 flex items-center gap-4 shrink-0">
-                   <button 
-                     onClick={() => setStep('home')}
-                     className="w-10 h-10 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
-                   >
-                     <ChevronLeft size={20} />
-                   </button>
-                   <h2 className="text-xl font-bold text-slate-900 dark:text-white">{t('portal.payment_title')}</h2>
+                <div className="p-4 sm:p-6 relative z-10 bg-white/40 dark:bg-black/20 backdrop-blur-md border-b border-slate-200 dark:border-white/10 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => setStep('home')}
+                      className="w-10 h-10 rounded-full bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">{t('portal.payment_title')}</h2>
+                      <p className="text-xs text-slate-500">
+                        {purchasedPass?.name || 'Pass Wi-Fi'} · <span className="font-bold text-slate-900 dark:text-white">{(purchasedPass?.price || (paymentConfig.price1h || 2)).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}</span>
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex-1 w-full overflow-y-auto" id="checkout">
-                   {clientSecret ? (
+                {/* Gateway Switcher */}
+                <div className="px-4 pt-3 pb-1 border-b border-slate-200 dark:border-white/10 bg-white/20 dark:bg-black/10 flex gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPortalPaymentGateway('card')}
+                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      portalPaymentGateway === 'card'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
+                    }`}
+                  >
+                    <CreditCard size={13} />
+                    <span>Carte CB</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPortalPaymentGateway('paypal')}
+                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      portalPaymentGateway === 'paypal'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
+                    }`}
+                  >
+                    <DollarSign size={13} />
+                    <span>PayPal</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPortalPaymentGateway('solana')}
+                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      portalPaymentGateway === 'solana'
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
+                    }`}
+                  >
+                    <Coins size={13} />
+                    <span>Solana (SOL)</span>
+                  </button>
+                </div>
+
+                <div className="flex-1 w-full overflow-y-auto p-4 sm:p-6" id="checkout">
+                  {portalPaymentGateway === 'card' && (
+                    clientSecret ? (
                       <Elements
                         stripe={stripePromise}
                         options={{ clientSecret, appearance: { theme: 'stripe' } }}
                       >
                         <CheckoutForm duration={selectedDuration} />
                       </Elements>
-                   ) : (
-                      <div className="flex items-center justify-center h-full">
-                         <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full py-12 gap-3">
+                        <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+                        <p className="text-xs text-slate-500">Initialisation sécurisée Stripe...</p>
                       </div>
-                   )}
+                    )
+                  )}
+
+                  {portalPaymentGateway === 'paypal' && (
+                    <div className="flex flex-col items-center justify-center space-y-5 py-4 max-w-sm mx-auto text-center">
+                      <div className="w-14 h-14 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-inner">
+                        <DollarSign size={32} />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Paiement Express PayPal</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          Réglez directement via votre compte PayPal ou sans compte par carte bancaire.
+                        </p>
+                      </div>
+
+                      <div className="w-full bg-slate-100 dark:bg-white/5 p-4 rounded-2xl border border-slate-200 dark:border-white/10 text-left space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">Forfait choisi :</span>
+                          <span className="font-semibold text-slate-900 dark:text-white">{purchasedPass?.name || 'Pass Wi-Fi'}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-500">Durée d'accès :</span>
+                          <span className="font-semibold text-slate-900 dark:text-white">{formatPassDuration(selectedDuration)}</span>
+                        </div>
+                        <div className="border-t border-slate-200 dark:border-white/10 pt-2 flex justify-between text-sm font-bold">
+                          <span className="text-slate-900 dark:text-white">Total à payer :</span>
+                          <span className="text-blue-600 dark:text-blue-400">
+                            {(purchasedPass?.price || (paymentConfig.price1h || 2)).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDirectPortalPaymentSuccess('PayPal Express', 'paypal')}
+                        disabled={isProcessingPayment}
+                        className="w-full py-3.5 px-4 rounded-xl bg-[#0070ba] hover:bg-[#005ea6] text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
+                      >
+                        {isProcessingPayment ? (
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                          <>
+                            <DollarSign size={16} />
+                            <span>Payer {(purchasedPass?.price || 2).toFixed(2)}€ avec PayPal</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {portalPaymentGateway === 'solana' && (
+                    <div className="flex flex-col items-center justify-center space-y-4 py-2 max-w-sm mx-auto text-center">
+                      <div className="bg-white p-3 rounded-2xl shadow-md border border-slate-200 dark:border-white/10">
+                        <QRCodeSVG 
+                          value={`solana:${portalGatewaysConfig.solanaWalletAddress}?amount=${(((purchasedPass?.price || 2) / 130)).toFixed(4)}&label=WiFiCash%20Pass`} 
+                          size={140} 
+                          level="M" 
+                        />
+                      </div>
+
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-center gap-1.5">
+                          <Coins size={16} className="text-purple-500" /> Solana Pay
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          Envoyez <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">{(((purchasedPass?.price || 2) / 130)).toFixed(4)} SOL</span> via Phantom / Solflare
+                        </p>
+                      </div>
+
+                      <div className="w-full bg-slate-100 dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/10 text-left">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                          <span>Adresse réceptrice SOL :</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(portalGatewaysConfig.solanaWalletAddress);
+                              setSolanaCopied(true);
+                              toast.success('Adresse Solana copiée !');
+                              setTimeout(() => setSolanaCopied(false), 2000);
+                            }}
+                            className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                          >
+                            {solanaCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                            Copier
+                          </button>
+                        </div>
+                        <p className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate bg-white dark:bg-black/30 p-2 rounded-lg border border-slate-200 dark:border-white/10">
+                          {portalGatewaysConfig.solanaWalletAddress}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDirectPortalPaymentSuccess('Solana Crypto (SOL)', 'solana')}
+                        disabled={isProcessingPayment}
+                        className="w-full py-3.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
+                      >
+                        {isProcessingPayment ? (
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        ) : (
+                          <>
+                            <Coins size={16} />
+                            <span>Valider le transfert SOL & Se Connecter</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
