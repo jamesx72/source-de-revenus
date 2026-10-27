@@ -13,7 +13,15 @@ import { ReceiptModal } from '../components/ReceiptModal';
 import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
 import { WifiReceipt } from '../types';
 import WifiPlansConfig from '../components/WifiPlansConfig';
-import { PaymentGatewaysSettings, getStoredGatewaysConfig, PaymentGatewaysConfig } from '../components/PaymentGatewaysSettings';
+import { 
+  PaymentGatewaysSettings, 
+  getStoredGatewaysConfig, 
+  saveStoredGatewaysConfig,
+  sanitizeGatewaysConfig,
+  PaymentGatewaysConfig,
+  SubscriptionActivationMetadata,
+  VALID_DEMO_SOLANA_ADDRESS
+} from '../components/PaymentGatewaysSettings';
 import { SubscriptionCheckoutModal } from '../components/SubscriptionCheckoutModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -121,14 +129,17 @@ export default function Dashboard() {
   const [platformSubscription, setPlatformSubscription] = useState<any>(null);
   const [paymentGatewaysConfig, setPaymentGatewaysConfig] = useState<PaymentGatewaysConfig>(getStoredGatewaysConfig);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-  const [subscriptionGatewayModalChoice, setSubscriptionGatewayModalChoice] = useState<'stripe' | 'paypal' | 'solana'>('stripe');
+  const [subscriptionGatewayModalChoice, setSubscriptionGatewayModalChoice] = useState<'stripe' | 'paypal' | 'solana'>('paypal');
   const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isGeneratingVouchers, setIsGeneratingVouchers] = useState(false);
+  const [isQuickGenerating1h, setIsQuickGenerating1h] = useState(false);
+  const [voucherFilter, setVoucherFilter] = useState<'all' | 'active' | 'used' | 'inactive'>('all');
+  const [voucherSearchQuery, setVoucherSearchQuery] = useState('');
   const [voucherConfig, setVoucherConfig] = useState({ 
     duration: '1h', 
     quantity: 1, 
     prefix: '', 
-    locationId: '', 
+    locationId: 'all', 
     speedLimit: '', 
     dataLimit: '',
     expiresInDays: 0,
@@ -360,7 +371,11 @@ export default function Dashboard() {
 
   const [isSubscribingToPlatform, setIsSubscribingToPlatform] = useState(false);
 
-  const handleActivatePlatformSubscription = async (gateway: 'stripe' | 'paypal' | 'solana', customPriceId?: string) => {
+  const handleActivatePlatformSubscription = async (
+    gateway: 'stripe' | 'paypal' | 'solana',
+    customPriceId?: string,
+    metadata?: SubscriptionActivationMetadata
+  ) => {
     if (!user) {
       toast.error("Veuillez vous connecter pour activer l'abonnement.");
       return;
@@ -369,41 +384,55 @@ export default function Dashboard() {
     const priceId = customPriceId || (
       gateway === 'stripe' ? (paymentGatewaysConfig.stripePriceId || (import.meta as any).env.VITE_STRIPE_PRICE_ID || 'price_1P0XWiFiCashBusiness49') :
       gateway === 'paypal' ? (paymentGatewaysConfig.paypalPlanId || (import.meta as any).env.VITE_PAYPAL_PLAN_ID || 'P-5ML4271244454362WXNWU5NQ') :
-      (paymentGatewaysConfig.solanaWalletAddress || (import.meta as any).env.VITE_SOLANA_WALLET_ADDRESS || '7XwPz4WiFiCashMerchantHubSolanaNetworkAddress9')
+      (paymentGatewaysConfig.solanaWalletAddress || (import.meta as any).env.VITE_SOLANA_WALLET_ADDRESS || VALID_DEMO_SOLANA_ADDRESS)
     );
+
+    const cryptoToken = metadata?.token === 'USDC' ? 'USDC' : 'SOL';
+    const resolvedAmount = gateway === 'solana'
+      ? (cryptoToken === 'USDC' ? parseFloat(paymentGatewaysConfig.cryptoUsdcPrice || '49') : parseFloat(paymentGatewaysConfig.solanaPriceSol || '0.35'))
+      : 49;
+    const resolvedCurrency = gateway === 'solana' ? cryptoToken : 'EUR';
 
     setIsSubscribingToPlatform(true);
     try {
-      const res = await fetch('/api/activate-platform-subscription', {
+      await fetch('/api/activate-platform-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.uid,
           gateway,
           priceId,
-          plan: 'business'
+          plan: 'business',
+          token: metadata?.token,
+          txHash: metadata?.txHash,
+          paypalOrderId: metadata?.paypalOrderId,
         })
       });
 
       const currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      let activatedData: any = {
+      const activatedData: any = {
         userId: user.uid,
         status: 'active',
         plan: 'business',
         gateway,
         priceId,
-        amount: gateway === 'solana' ? 0.35 : 49,
-        currency: gateway === 'solana' ? 'SOL' : 'EUR',
+        amount: resolvedAmount,
+        currency: resolvedCurrency,
+        token: metadata?.token || null,
+        txHash: metadata?.txHash || null,
+        paypalOrderId: metadata?.paypalOrderId || null,
         currentPeriodEnd
       };
 
       try {
         const { collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc } = await import('firebase/firestore');
         const { db } = await import('../firebase');
-        const existingQuery = query(collection(db, 'subscriptions'), where('userId', '==', user.uid), where('status', '==', 'active'));
+        const existingQuery = query(collection(db, 'subscriptions'), where('userId', '==', user.uid));
         const snap = await getDocs(existingQuery);
         for (const d of snap.docs) {
-          await updateDoc(d.ref, { status: 'canceled', updatedAt: serverTimestamp() });
+          if (d.data()?.status === 'active') {
+            await updateDoc(d.ref, { status: 'canceled', updatedAt: serverTimestamp() });
+          }
         }
         const docRef = await addDoc(collection(db, 'subscriptions'), {
           ...activatedData,
@@ -416,11 +445,15 @@ export default function Dashboard() {
       }
 
       setPlatformSubscription(activatedData);
-      const gatewayName = gateway === 'stripe' ? 'Stripe (CB)' : gateway === 'paypal' ? 'PayPal' : 'Crypto Solana';
+      const gatewayName = gateway === 'stripe'
+        ? 'Stripe (CB)'
+        : gateway === 'paypal'
+        ? 'PayPal'
+        : `Crypto (${cryptoToken})`;
       toast.success(`Abonnement Business activé avec succès via ${gatewayName} !`);
     } catch (e: any) {
       console.error(e);
-      toast.error('Erreur lors de l\'activation: ' + (e.message || 'Serveur indisponible'));
+      toast.error("Erreur lors de l'activation: " + (e.message || 'Serveur indisponible'));
     } finally {
       setIsSubscribingToPlatform(false);
     }
@@ -539,20 +572,41 @@ export default function Dashboard() {
       }
       setIsLoadingLocations(true);
       try {
-        const { collection, getDocs, query, where, orderBy, limit, onSnapshot } = await import('firebase/firestore');
+        const { collection, doc, getDoc, getDocs, query, where, onSnapshot } = await import('firebase/firestore');
         const { db } = await import('../firebase');
+
+        // Hydrate saved payment gateways config from Firestore if available
+        try {
+          const gwSnap = await getDoc(doc(db, 'payment_settings', user.uid));
+          if (gwSnap.exists()) {
+            const remoteCfg = sanitizeGatewaysConfig(gwSnap.data() as Partial<PaymentGatewaysConfig>);
+            setPaymentGatewaysConfig(remoteCfg);
+            saveStoredGatewaysConfig(remoteCfg);
+          }
+        } catch (gwErr) {
+          console.warn("Gateway settings fetch notice:", gwErr);
+        }
+
+        const getTimeMs = (val: any): number => {
+          if (!val) return 0;
+          if (typeof val.toMillis === 'function') return val.toMillis();
+          if (typeof val.seconds === 'number') return val.seconds * 1000;
+          const parsed = Date.parse(String(val));
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
         const q = query(
           collection(db, 'locations'),
-          where('userId', '==', user.uid),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', user.uid)
         );
         const querySnapshot = await getDocs(q);
-        const locs = querySnapshot.docs.map((doc, idx) => ({ 
-          id: doc.id, 
-          ...doc.data(),
-          // Mock heartbeat: Every second location is simulated offline for demonstration (> 5 mins)
-          lastHeartbeat: Date.now() - (idx === 0 ? 30000 : 360000) 
-        })) as any[];
+        const locs = querySnapshot.docs
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .sort((a, b) => getTimeMs(b.createdAt) - getTimeMs(a.createdAt))
+          .map((loc, idx) => ({
+            ...loc,
+            lastHeartbeat: Date.now() - (idx === 0 ? 30000 : 360000)
+          }));
         setLocations(locs);
         if (locs.length === 0) {
           setShowSetupWizard(true);
@@ -560,14 +614,12 @@ export default function Dashboard() {
 
         const connectionsQuery = query(
           collection(db, 'connections'),
-          where('userId', '==', user.uid),
-          orderBy('connectedAt', 'desc')
+          where('userId', '==', user.uid)
         );
         unsubscribeConnections = onSnapshot(connectionsQuery, (snapshot) => {
-           const logData = snapshot.docs.map(doc => ({
-             id: doc.id,
-             ...doc.data()
-           }));
+           const logData = snapshot.docs
+             .map(d => ({ id: d.id, ...(d.data() as any) }))
+             .sort((a, b) => getTimeMs(b.connectedAt) - getTimeMs(a.connectedAt));
            setConnections(logData);
         }, (error) => {
            console.error("Error fetching connections logs in real-time:", error);
@@ -575,14 +627,12 @@ export default function Dashboard() {
 
         const transactionsQuery = query(
           collection(db, 'transactions'),
-          where('userId', '==', user.uid),
-          orderBy('createdAt', 'desc')
+          where('userId', '==', user.uid)
         );
         unsubscribeTransactions = onSnapshot(transactionsQuery, (snapshot) => {
-           const txData = snapshot.docs.map(doc => ({
-             id: doc.id,
-             ...doc.data()
-           }));
+           const txData = snapshot.docs
+             .map(d => ({ id: d.id, ...(d.data() as any) }))
+             .sort((a, b) => getTimeMs(b.createdAt) - getTimeMs(a.createdAt));
            setTransactions(txData);
         }, (error) => {
            console.error("Error fetching transactions in real-time:", error);
@@ -590,14 +640,12 @@ export default function Dashboard() {
 
         const vouchersQuery = query(
           collection(db, 'vouchers'),
-          where('createdBy', '==', user.uid),
-          orderBy('createdAt', 'desc')
+          where('createdBy', '==', user.uid)
         );
         unsubscribeVouchers = onSnapshot(vouchersQuery, (snapshot) => {
-           const vData = snapshot.docs.map(doc => ({
-             id: doc.id,
-             ...doc.data()
-           }));
+           const vData = snapshot.docs
+             .map(d => ({ id: d.id, ...(d.data() as any) }))
+             .sort((a, b) => getTimeMs(b.createdAt) - getTimeMs(a.createdAt));
            setVouchers(vData);
         }, (error) => {
            console.error("Error fetching vouchers in real-time:", error);
@@ -605,14 +653,12 @@ export default function Dashboard() {
 
         const discountsQuery = query(
           collection(db, 'discounts'),
-          where('createdBy', '==', user.uid),
-          orderBy('createdAt', 'desc')
+          where('createdBy', '==', user.uid)
         );
         unsubscribeDiscounts = onSnapshot(discountsQuery, (snapshot) => {
-           const dData = snapshot.docs.map(doc => ({
-             id: doc.id,
-             ...doc.data()
-           }));
+           const dData = snapshot.docs
+             .map(d => ({ id: d.id, ...(d.data() as any) }))
+             .sort((a, b) => getTimeMs(b.createdAt) - getTimeMs(a.createdAt));
            setDiscounts(dData);
         }, (error) => {
            console.error("Error fetching discounts in real-time:", error);
@@ -620,16 +666,15 @@ export default function Dashboard() {
 
         const subscriptionsQuery = query(
           collection(db, 'subscriptions'),
-          where('userId', '==', user.uid),
-          orderBy('createdAt', 'desc'),
-          limit(1)
+          where('userId', '==', user.uid)
         );
         unsubscribeSubscriptions = onSnapshot(subscriptionsQuery, (snapshot) => {
           if (!snapshot.empty) {
-            setPlatformSubscription({
-              id: snapshot.docs[0].id,
-              ...snapshot.docs[0].data()
-            });
+            const sortedSubs = snapshot.docs
+              .map(d => ({ id: d.id, ...(d.data() as any) }))
+              .sort((a, b) => getTimeMs(b.createdAt) - getTimeMs(a.createdAt));
+            const activeSub = sortedSubs.find(s => s.status === 'active') || sortedSubs[0];
+            setPlatformSubscription(activeSub);
           } else {
             setPlatformSubscription(null);
           }
@@ -818,41 +863,138 @@ export default function Dashboard() {
     }
   };
 
-  const handleGenerateVouchers = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsGeneratingVouchers(true);
+  const VOUCHER_DURATION_MAP: Record<string, { label: string; minutes: number }> = {
+    '30m': { label: '30 minutes', minutes: 30 },
+    '1h': { label: '1 heure', minutes: 60 },
+    '2h': { label: '2 heures', minutes: 120 },
+    '4h': { label: '4 heures', minutes: 240 },
+    '8h': { label: '8 heures', minutes: 480 },
+    '24h': { label: '24 heures', minutes: 1440 },
+    '7d': { label: '7 jours', minutes: 10080 },
+    '30d': { label: '30 jours', minutes: 43200 },
+  };
+
+  const generateSecureVoucherCode = (rawPrefix = '', length = 8) => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const randomValues = new Uint32Array(length);
+    window.crypto.getRandomValues(randomValues);
+    const sanitizedPrefix = rawPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    let token = '';
+    for (let i = 0; i < length; i++) {
+      token += alphabet[randomValues[i] % alphabet.length];
+    }
+    return sanitizedPrefix ? `${sanitizedPrefix}-${token}` : token;
+  };
+
+  const getVoucherPortalUrl = (voucher: { code: string; locationId?: string }) => {
+    const base = `${window.location.origin}/portal?code=${encodeURIComponent(voucher.code)}`;
+    if (voucher.locationId && voucher.locationId !== 'all') {
+      return `${base}&locationId=${encodeURIComponent(voucher.locationId)}`;
+    }
+    return base;
+  };
+
+  const handleQuickGenerateOneHourPass = async () => {
+    if (!user) return;
+    setIsQuickGenerating1h(true);
     try {
-      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const { collection, addDoc } = await import('firebase/firestore');
       const { db } = await import('../firebase');
-      
-      const promises = [];
-      const generateCode = () => {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-        let code = voucherConfig.prefix ? voucherConfig.prefix.toUpperCase() + '-' : '';
-        for (let i = 0; i < 6; i++) {
-          code += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return code;
+
+      const code = generateSecureVoucherCode('PASS1H', 8);
+      const effectiveLocationId = locations[0]?.id || 'all';
+      const locationName = effectiveLocationId === 'all'
+        ? 'Tous les établissements'
+        : (locations.find(l => l.id === effectiveLocationId)?.name || 'Mon Établissement');
+      const nowIso = new Date().toISOString();
+
+      const voucherPayload = {
+        code,
+        duration: '1 heure',
+        durationMinutes: 60,
+        speedLimit: null,
+        dataLimit: null,
+        locationId: effectiveLocationId,
+        locationName,
+        status: 'active',
+        createdAt: nowIso,
+        expiresAt: null,
+        note: 'Pass rapide 1 heure',
+        usedAt: null,
+        createdBy: user.uid
       };
 
-      for (let i = 0; i < voucherConfig.quantity; i++) {
-        promises.push(addDoc(collection(db, 'vouchers'), {
-          code: generateCode(),
-          duration: voucherConfig.duration,
-          speedLimit: voucherConfig.speedLimit || null,
-          dataLimit: voucherConfig.dataLimit || null,
-          locationId: voucherConfig.locationId || locations[0]?.id || '',
-          status: 'active', // active, used, revoked
-          createdAt: new Date().toISOString(),
-          usedAt: null,
-          createdBy: user?.uid
-        }));
+      const docRef = await addDoc(collection(db, 'vouchers'), voucherPayload);
+      setSelectedVoucherForPrint({ id: docRef.id, ...voucherPayload });
+      toast.success(`Pass 1 heure généré : ${code}`);
+    } catch (err: any) {
+      console.error("Failed to quick-generate 1h voucher:", err);
+      toast.error("Erreur lors de la création du Pass 1h.");
+    } finally {
+      setIsQuickGenerating1h(false);
+    }
+  };
+
+  const handleGenerateVouchers = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    const qty = Math.min(100, Math.max(1, Number(voucherConfig.quantity) || 1));
+    setIsGeneratingVouchers(true);
+    try {
+      const { collection, addDoc } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const durationInfo = VOUCHER_DURATION_MAP[voucherConfig.duration] || { label: '1 heure', minutes: 60 };
+      const effectiveLocationId = voucherConfig.locationId || locations[0]?.id || 'all';
+      const locationName = effectiveLocationId === 'all'
+        ? 'Tous les établissements'
+        : (locations.find(l => l.id === effectiveLocationId)?.name || 'Mon Établissement');
+      const nowIso = new Date().toISOString();
+      const expiresAt = voucherConfig.expiresInDays && Number(voucherConfig.expiresInDays) > 0
+        ? new Date(Date.now() + Number(voucherConfig.expiresInDays) * 86400 * 1000).toISOString()
+        : null;
+      const cleanNote = voucherConfig.note.trim() || null;
+
+      const generatedCodes = new Set<string>();
+      while (generatedCodes.size < qty) {
+        generatedCodes.add(generateSecureVoucherCode(voucherConfig.prefix, 8));
       }
 
-      await Promise.all(promises);
-      toast.success(`${voucherConfig.quantity} code(s) généré(s) avec succès.`);
+      const createdPayloads = Array.from(generatedCodes).map((code) => ({
+        code,
+        duration: durationInfo.label,
+        durationMinutes: durationInfo.minutes,
+        speedLimit: voucherConfig.speedLimit || null,
+        dataLimit: voucherConfig.dataLimit || null,
+        locationId: effectiveLocationId,
+        locationName,
+        status: 'active',
+        createdAt: nowIso,
+        expiresAt,
+        note: cleanNote,
+        usedAt: null,
+        createdBy: user.uid
+      }));
+
+      const docRefs = await Promise.all(
+        createdPayloads.map((payload) => addDoc(collection(db, 'vouchers'), payload))
+      );
+
+      toast.success(`${qty} code(s) d'accès (${durationInfo.label}) généré(s) avec succès.`);
       setShowVoucherModal(false);
-      setVoucherConfig({ duration: '1h', quantity: 1, prefix: '', locationId: locations[0]?.id || '', speedLimit: '', dataLimit: '' });
+      if (qty === 1 && docRefs[0]) {
+        setSelectedVoucherForPrint({ id: docRefs[0].id, ...createdPayloads[0] });
+      }
+      setVoucherConfig({
+        duration: '1h',
+        quantity: 1,
+        prefix: '',
+        locationId: locations[0]?.id || 'all',
+        speedLimit: '',
+        dataLimit: '',
+        expiresInDays: 0,
+        note: ''
+      });
     } catch (err: any) {
       console.error("Failed to generate vouchers:", err.message);
       toast.error("Erreur lors de la génération des codes.");
@@ -913,12 +1055,12 @@ export default function Dashboard() {
   };
 
   const handleRevokeVoucher = async (voucherId: string) => {
-    if (!confirm('Voulez-vous vraiment révoquer ce code d\'accès ?')) return;
     try {
       const { doc, updateDoc } = await import('firebase/firestore');
       const { db } = await import('../firebase');
       await updateDoc(doc(db, 'vouchers', voucherId), {
-        status: 'revoked'
+        status: 'revoked',
+        updatedAt: new Date().toISOString()
       });
       toast.success("Code d'accès révoqué avec succès.");
     } catch(err) {
@@ -2105,21 +2247,54 @@ export default function Dashboard() {
               </div>
             )}
 
-            {!isDataLoading && activeTab === 'vouchers' && (
+            {!isDataLoading && activeTab === 'vouchers' && (() => {
+              const getEffectiveStatus = (v: any): 'active' | 'used' | 'revoked' | 'expired' => {
+                if (v.status === 'used') return 'used';
+                if (v.status === 'revoked') return 'revoked';
+                if (v.status === 'expired') return 'expired';
+                if (v.expiresAt && new Date(v.expiresAt).getTime() < Date.now()) return 'expired';
+                return 'active';
+              };
+
+              const activeCount = vouchers.filter(v => getEffectiveStatus(v) === 'active').length;
+              const usedCount = vouchers.filter(v => getEffectiveStatus(v) === 'used').length;
+              const inactiveCount = vouchers.filter(v => {
+                const st = getEffectiveStatus(v);
+                return st === 'revoked' || st === 'expired';
+              }).length;
+
+              const displayedVouchers = vouchers.filter((v) => {
+                const st = getEffectiveStatus(v);
+                if (voucherFilter === 'active' && st !== 'active') return false;
+                if (voucherFilter === 'used' && st !== 'used') return false;
+                if (voucherFilter === 'inactive' && st !== 'revoked' && st !== 'expired') return false;
+                if (voucherSearchQuery.trim()) {
+                  const q = voucherSearchQuery.trim().toLowerCase();
+                  const codeMatch = String(v.code || '').toLowerCase().includes(q);
+                  const noteMatch = String(v.note || '').toLowerCase().includes(q);
+                  const durMatch = String(v.duration || '').toLowerCase().includes(q);
+                  return codeMatch || noteMatch || durMatch;
+                }
+                return true;
+              });
+
+              return (
               <div className="space-y-8">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Vouchers & Codes d'accès</h2>
-                    <p className="text-slate-500 dark:text-slate-400">Générez des codes à usage unique ou limités dans le temps (idéal pour les hôtels ou l'accès payant).</p>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1.5">Vouchers & Codes d'accès</h2>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">
+                      Générez des codes cryptographiques à usage unique limités dans le temps (ex: Pass 1 heure, 24 heures) utilisables sur le portail captif.
+                    </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     <button
                       onClick={async () => {
                         try {
                           const jsPDF = (await import('jspdf')).default;
                           const pdf = new jsPDF('p', 'mm', 'a4');
                           
-                          const activeVouchers = vouchers.filter(v => v.status === 'active');
+                          const activeVouchers = vouchers.filter(v => getEffectiveStatus(v) === 'active');
                           
                           if (activeVouchers.length === 0) {
                             toast.error("Aucun voucher actif à exporter.");
@@ -2130,59 +2305,52 @@ export default function Dashboard() {
                           pdf.setFont("helvetica", "bold");
                           pdf.text("Vouchers d'accès WiFi", 105, 15, { align: 'center' });
                           
-                          const cols = 2; // 2 vouchers per row
+                          const cols = 2;
                           const margin = 10;
                           const pageWidth = 210;
-                          const cardWidth = (pageWidth - (margin * 3)) / cols; // ~90mm
+                          const cardWidth = (pageWidth - (margin * 3)) / cols;
                           const cardHeight = 45;
                           
                           let xOffset = margin;
                           let yOffset = 25;
                           
                           activeVouchers.forEach((v, index) => {
-                             if (yOffset + cardHeight > 280) { // Page turning
+                             if (yOffset + cardHeight > 280) {
                                 pdf.addPage();
                                 yOffset = 20;
                                 xOffset = margin;
                              }
                              
-                             // Draw Ticket Rect
                              pdf.setDrawColor(200, 200, 255);
                              pdf.setFillColor(248, 250, 255);
                              pdf.roundedRect(xOffset, yOffset, cardWidth, cardHeight, 3, 3, "FD");
                              
-                             // Header Line
                              pdf.setDrawColor(220, 220, 250);
                              pdf.line(xOffset, yOffset + 12, xOffset + cardWidth, yOffset + 12);
                              
-                             // Network Name
                              pdf.setFontSize(10);
                              pdf.setFont("helvetica", "bold");
                              pdf.setTextColor(100, 100, 150);
                              pdf.text("Accès Internet Sécurisé", xOffset + cardWidth/2, yOffset + 8, { align: 'center' });
                              
-                             // CODE
-                             pdf.setFontSize(22);
+                             pdf.setFontSize(19);
                              pdf.setFont("courier", "bold");
                              pdf.setTextColor(20, 20, 40);
-                             pdf.text(v.code, xOffset + cardWidth/2, yOffset + 25, { align: 'center' });
+                             pdf.text(String(v.code), xOffset + cardWidth/2, yOffset + 24, { align: 'center' });
                              
-                             // Duration badge
                              pdf.setFillColor(230, 230, 250);
-                             pdf.roundedRect(xOffset + cardWidth/2 - 15, yOffset + 30, 30, 6, 2, 2, "F");
+                             pdf.roundedRect(xOffset + cardWidth/2 - 18, yOffset + 29, 36, 6, 2, 2, "F");
                              
                              pdf.setFontSize(9);
                              pdf.setFont("helvetica", "bold");
                              pdf.setTextColor(80, 80, 120);
-                             pdf.text(v.duration, xOffset + cardWidth/2, yOffset + 34.5, { align: 'center' });
+                             pdf.text(String(v.duration), xOffset + cardWidth/2, yOffset + 33.5, { align: 'center' });
                              
-                             // Footer
                              pdf.setFontSize(7);
                              pdf.setFont("helvetica", "normal");
                              pdf.setTextColor(150, 150, 150);
-                             pdf.text(`Reseau WiFi - Connectez-vous et entrez ce code`, xOffset + cardWidth/2, yOffset + 41, { align: 'center' });
+                             pdf.text(`Connectez-vous au Wi-Fi et saisissez ce code`, xOffset + cardWidth/2, yOffset + 41, { align: 'center' });
                              
-                             // Move next
                              if ((index + 1) % cols === 0) {
                                xOffset = margin;
                                yOffset += cardHeight + margin;
@@ -2200,16 +2368,54 @@ export default function Dashboard() {
                       }}
                       className="flex items-center gap-2 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-slate-50 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-xl transition-colors font-medium text-sm"
                     >
-                      <Download size={18} />
-                      Exporter Grille PDF
+                      <Download size={17} />
+                      <span>Exporter Grille PDF</span>
                     </button>
                     <button
-                      onClick={() => setShowVoucherModal(true)}
-                      className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm"
+                      onClick={handleQuickGenerateOneHourPass}
+                      disabled={isQuickGenerating1h}
+                      className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm shadow-sm"
                     >
-                      <Plus size={18} />
-                      Générer des codes
+                      {isQuickGenerating1h ? <RefreshCw size={17} className="animate-spin" /> : <Clock size={17} />}
+                      <span>Pass Rapide 1h</span>
                     </button>
+                    <button
+                      onClick={() => {
+                        setVoucherConfig(prev => ({
+                          ...prev,
+                          locationId: prev.locationId || locations[0]?.id || 'all'
+                        }));
+                        setShowVoucherModal(true);
+                      }}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl transition-colors font-medium text-sm shadow-sm"
+                    >
+                      <Plus size={17} />
+                      <span>Générer des codes</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Summary Metrics */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Total générés</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">{vouchers.length}</p>
+                    <p className="text-xs text-slate-400 mt-1">Tous les lots confondus</p>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Codes disponibles</p>
+                    <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1 tabular-nums">{activeCount}</p>
+                    <p className="text-xs text-slate-400 mt-1">Prêts à être utilisés</p>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Sessions activées</p>
+                    <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1 tabular-nums">{usedCount}</p>
+                    <p className="text-xs text-slate-400 mt-1">Codes consommés sur le portail</p>
+                  </div>
+                  <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Expirés ou révoqués</p>
+                    <p className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-1 tabular-nums">{inactiveCount}</p>
+                    <p className="text-xs text-slate-400 mt-1">Codes désactivés</p>
                   </div>
                 </div>
 
@@ -2222,92 +2428,206 @@ export default function Dashboard() {
                 />
 
                 <div className="bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-3xl backdrop-blur-md shadow-sm overflow-hidden flex flex-col">
-                 <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-white/5">
-                    <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Codes récents</h3>
-                    <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl">
-                       <button className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm">Tous</button>
-                       <button className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">Actifs</button>
+                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 border-b border-slate-100 dark:border-white/5">
+                    <div>
+                      <h3 className="font-semibold text-lg text-slate-900 dark:text-white">Codes d'accès générés</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Chaque code est validé de manière atomique à la première utilisation sur le portail captif.
+                      </p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                      <div className="relative">
+                        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          value={voucherSearchQuery}
+                          onChange={(e) => setVoucherSearchQuery(e.target.value)}
+                          placeholder="Rechercher code ou note..."
+                          className="pl-9 pr-3 py-1.5 text-sm bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-52"
+                        />
+                      </div>
+                      <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-xl">
+                        <button
+                          onClick={() => setVoucherFilter('all')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${voucherFilter === 'all' ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                        >
+                          Tous ({vouchers.length})
+                        </button>
+                        <button
+                          onClick={() => setVoucherFilter('active')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${voucherFilter === 'active' ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                        >
+                          Actifs ({activeCount})
+                        </button>
+                        <button
+                          onClick={() => setVoucherFilter('used')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${voucherFilter === 'used' ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                        >
+                          Utilisés ({usedCount})
+                        </button>
+                        <button
+                          onClick={() => setVoucherFilter('inactive')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${voucherFilter === 'inactive' ? 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                        >
+                          Inactifs ({inactiveCount})
+                        </button>
+                      </div>
                     </div>
                  </div>
                  <div className="overflow-x-auto">
                    <table className="w-full text-left text-sm">
-                      <thead className="bg-white dark:bg-white/5 text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-white/5">
+                      <thead className="bg-slate-50/60 dark:bg-white/5 text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-white/5">
                         <tr>
                           <th className="px-6 py-4 font-medium">Code d'accès</th>
-                          <th className="px-6 py-4 font-medium">Durée / Validité</th>
-                          <th className="px-6 py-4 font-medium shrink-0">Statut</th>
+                          <th className="px-6 py-4 font-medium">Durée & Limites</th>
+                          <th className="px-6 py-4 font-medium shrink-0">État</th>
                           <th className="px-6 py-4 font-medium">Établissement</th>
-                          <th className="px-6 py-4 font-medium">Créé le</th>
-                          <th className="px-6 py-4"></th>
+                          <th className="px-6 py-4 font-medium">Création / Expiration</th>
+                          <th className="px-6 py-4 text-right font-medium">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5 text-slate-600 dark:text-slate-300">
-                        {vouchers.map((voucher) => (
-                          <tr key={voucher.id} className="hover:bg-white dark:bg-white/5 transition-colors">
+                      <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-slate-600 dark:text-slate-300">
+                        {displayedVouchers.map((voucher) => {
+                          const effectiveStatus = getEffectiveStatus(voucher);
+                          const portalUrl = getVoucherPortalUrl(voucher);
+                          const locLabel = voucher.locationId === 'all' || !voucher.locationId
+                            ? 'Tous les établissements'
+                            : (locations.find(l => l.id === voucher.locationId)?.name || voucher.locationName || 'Établissement');
+
+                          return (
+                          <tr key={voucher.id} className="hover:bg-slate-50/70 dark:hover:bg-white/5 transition-colors">
                             <td className="px-6 py-4">
                               <div className="flex items-center gap-4">
                                 <div className="bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm shrink-0" title="Scanner pour se connecter">
                                   <QRCodeSVG 
-                                    value={`${window.location.origin}/portal?code=${voucher.code}`}
-                                    size={48} 
+                                    value={portalUrl}
+                                    size={46} 
                                     level={"M"}
                                     includeMargin={false}
                                   />
                                 </div>
-                                <div>
-                                  <div className="font-mono font-bold text-lg text-slate-900 dark:text-white tracking-widest leading-none">{voucher.code}</div>
-                                  <div className="text-[10px] text-slate-500 mt-1 uppercase font-semibold">Scanner pour rejoindre</div>
+                                <div className="min-w-0">
+                                  <div className="font-mono font-bold text-base text-slate-900 dark:text-white tracking-wider leading-tight">
+                                    {voucher.code}
+                                  </div>
+                                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate max-w-[220px]">
+                                    {voucher.note ? voucher.note : 'Usage unique · QR direct'}
+                                  </div>
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4">{voucher.duration}</td>
                             <td className="px-6 py-4">
-                              <span className={`px-2.5 py-1 rounded-full text-[10px] uppercase tracking-wider font-bold ${voucher.status === 'active' ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : voucher.status === 'revoked' ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400' : 'bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-slate-400'}`}>
-                                {voucher.status === 'active' ? 'actif' : voucher.status === 'revoked' ? 'révoqué' : voucher.status}
-                              </span>
+                              <div className="font-medium text-slate-900 dark:text-white">
+                                {voucher.duration}
+                                {voucher.durationMinutes ? (
+                                  <span className="text-xs font-normal text-slate-400 ml-1.5">· {voucher.durationMinutes} min</span>
+                                ) : null}
+                              </div>
+                              {(voucher.speedLimit || voucher.dataLimit) ? (
+                                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {[
+                                    voucher.speedLimit ? voucher.speedLimit.split('/')[0].replace('M', ' Mbps') : null,
+                                    voucher.dataLimit ? voucher.dataLimit.replace('M', ' Mo').replace('G', ' Go') : null
+                                  ].filter(Boolean).join(' · ')}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-slate-400 mt-0.5">Débit & volume illimités</div>
+                              )}
                             </td>
-                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                               {voucher.locationId === 'all' || !voucher.locationId ? 'Tous les établissements' : locations.find(l => l.id === voucher.locationId)?.name || 'Inconnu'}
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 font-medium text-xs">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 ${
+                                    effectiveStatus === 'active'
+                                      ? 'bg-emerald-500'
+                                      : effectiveStatus === 'used'
+                                      ? 'bg-indigo-500'
+                                      : effectiveStatus === 'expired'
+                                      ? 'bg-amber-500'
+                                      : 'bg-red-500'
+                                  }`}
+                                />
+                                <span
+                                  className={
+                                    effectiveStatus === 'active'
+                                      ? 'text-emerald-700 dark:text-emerald-400'
+                                      : effectiveStatus === 'used'
+                                      ? 'text-indigo-700 dark:text-indigo-400'
+                                      : effectiveStatus === 'expired'
+                                      ? 'text-amber-700 dark:text-amber-400'
+                                      : 'text-red-600 dark:text-red-400'
+                                  }
+                                >
+                                  {effectiveStatus === 'active'
+                                    ? 'Actif'
+                                    : effectiveStatus === 'used'
+                                    ? 'Utilisé'
+                                    : effectiveStatus === 'expired'
+                                    ? 'Expiré'
+                                    : 'Révoqué'}
+                                </span>
+                              </div>
+                              {effectiveStatus === 'used' && voucher.usedAt && (
+                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                  {new Date(voucher.usedAt).toLocaleDateString('fr-FR')} à {new Date(voucher.usedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  {voucher.usedByDevice ? ` · ${voucher.usedByDevice}` : ''}
+                                </div>
+                              )}
                             </td>
-                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400">
-                               {new Date(voucher.createdAt).toLocaleDateString('fr-FR')} à {new Date(voucher.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            <td className="px-6 py-4 text-slate-600 dark:text-slate-300">
+                              {locLabel}
                             </td>
-                            <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
-                               <button 
-                                 onClick={() => {
-                                   setSelectedVoucherForPrint(voucher);
-                                 }}
-                                 className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
-                                 title="QR & Imprimer"
-                               >
-                                 <QrCode size={16} /> Imprimer
-                               </button>
-                               <button 
-                                 onClick={() => {
-                                   navigator.clipboard.writeText(voucher.code);
-                                   toast.success("Code copié dans le presse-papier !");
-                                 }}
-                                 className="text-indigo-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
-                                 title="Copier"
-                               >
-                                 Copier
-                               </button>
-                               {voucher.status === 'active' && (
-                               <button 
-                                 onClick={() => handleRevokeVoucher(voucher.id)}
-                                 className="text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
-                                 title="Révoquer"
-                               >
-                                 <XCircle size={16} /> Révoquer
-                               </button>
-                               )}
+                            <td className="px-6 py-4 text-slate-500 dark:text-slate-400 text-xs">
+                              <div>
+                                {new Date(voucher.createdAt).toLocaleDateString('fr-FR')} · {new Date(voucher.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                              {voucher.expiresAt ? (
+                                <div className="text-slate-400 mt-0.5">
+                                  Limite : {new Date(voucher.expiresAt).toLocaleDateString('fr-FR')}
+                                </div>
+                              ) : (
+                                <div className="text-slate-400 mt-0.5">Sans date limite</div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button 
+                                  onClick={() => setSelectedVoucherForPrint(voucher)}
+                                  className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/10 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium"
+                                  title="Afficher le QR & Imprimer"
+                                >
+                                  <QrCode size={15} /> Imprimer
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(voucher.code);
+                                    toast.success(`Code ${voucher.code} copié !`);
+                                  }}
+                                  className="text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                                  title="Copier le code"
+                                >
+                                  <Copy size={14} /> Copier
+                                </button>
+                                {effectiveStatus === 'active' && (
+                                <button 
+                                  onClick={() => handleRevokeVoucher(voucher.id)}
+                                  className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                                  title="Révoquer ce code immédiatement"
+                                >
+                                  <XCircle size={15} /> Révoquer
+                                </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
-                        ))}
-                        {vouchers.length === 0 && (
+                          );
+                        })}
+                        {displayedVouchers.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
-                              Aucun voucher généré pour le moment.
+                            <td colSpan={6} className="px-6 py-10 text-center text-slate-500">
+                              {vouchers.length === 0
+                                ? "Aucun voucher généré pour le moment. Cliquez sur « Pass Rapide 1h » ou « Générer des codes »."
+                                : "Aucun code ne correspond à vos critères de recherche."}
                             </td>
                           </tr>
                         )}
@@ -2316,7 +2636,8 @@ export default function Dashboard() {
                  </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {!isDataLoading && activeTab === 'discounts' && (
               <div className="space-y-8">
@@ -3862,14 +4183,19 @@ export default function Dashboard() {
                           </div>
                           <div className="bg-white dark:bg-white/5 rounded-xl p-4 border border-slate-200 dark:border-white/5">
                             <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">PASSERELLE UTILISÉE</p>
-                            <p className="font-semibold text-indigo-600 dark:text-indigo-400 capitalize">
-                              {platformSubscription?.gateway === 'solana' ? 'Solana Pay (SOL)' : platformSubscription?.gateway === 'paypal' ? 'PayPal Subscriptions' : 'Stripe (CB)'}
+                            <p className="font-semibold text-indigo-600 dark:text-indigo-400">
+                              {platformSubscription?.gateway === 'solana'
+                                ? `Crypto Solana (${platformSubscription?.currency || 'SOL'})`
+                                : platformSubscription?.gateway === 'paypal'
+                                ? 'PayPal Subscriptions'
+                                : 'Stripe (CB)'}
                             </p>
                           </div>
                           <div className="bg-white dark:bg-white/5 rounded-xl p-4 border border-slate-200 dark:border-white/5">
                             <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">STATUT DE FACTURATION</p>
                             <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span> À jour (49€/m)
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              À jour ({platformSubscription?.amount || 49} {platformSubscription?.currency === 'EUR' || !platformSubscription?.currency ? '€' : platformSubscription.currency}/m)
                             </p>
                           </div>
                         </div>
@@ -5518,7 +5844,7 @@ export default function Dashboard() {
                    
                    <div className="p-6 bg-white border border-slate-200 rounded-3xl shadow-sm my-8">
                      <QRCodeSVG 
-                        value={`${window.location.origin}/portal?code=${selectedVoucherForPrint.code}`}
+                        value={getVoucherPortalUrl(selectedVoucherForPrint)}
                         size={200} 
                         level={"H"}
                         includeMargin={false}
@@ -5527,12 +5853,15 @@ export default function Dashboard() {
                    
                    <div className="bg-slate-50 dark:bg-slate-800 print:bg-slate-50 p-6 rounded-2xl w-full border-2 border-dashed border-slate-300 dark:border-slate-600 print:border-gray-300 mb-6">
                      <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-widest mb-3">Code d'accès sécurisé</p>
-                     <div className="font-mono text-5xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black">{selectedVoucherForPrint.code}</div>
+                     <div className="font-mono text-3xl sm:text-4xl font-bold tracking-widest text-slate-900 dark:text-white print:text-black break-all">{selectedVoucherForPrint.code}</div>
                    </div>
-                   <div className="text-base text-slate-500 dark:text-slate-400 w-full mb-4">
+                   <div className="text-sm text-slate-500 dark:text-slate-400 w-full mb-4">
                      <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
-                        <span>Durée de validité :</span> 
-                        <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.duration}</span>
+                        <span>Durée de la session Wi-Fi :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {selectedVoucherForPrint.duration}
+                          {selectedVoucherForPrint.durationMinutes ? ` (${selectedVoucherForPrint.durationMinutes} min)` : ''}
+                        </span>
                      </div>
                      {selectedVoucherForPrint.speedLimit && (
                      <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
@@ -5546,16 +5875,37 @@ export default function Dashboard() {
                         <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.dataLimit.replace('M', ' Mo').replace('G', ' Go')}</span>
                      </div>
                      )}
+                     {selectedVoucherForPrint.expiresAt && (
+                     <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                        <span>À activer avant le :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{new Date(selectedVoucherForPrint.expiresAt).toLocaleDateString('fr-FR')}</span>
+                     </div>
+                     )}
+                     {selectedVoucherForPrint.note && (
+                     <div className="flex justify-between items-center py-2 border-b border-dashed border-slate-200 dark:border-slate-700">
+                        <span>Référence :</span> 
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedVoucherForPrint.note}</span>
+                     </div>
+                     )}
                    </div>
                  </div>
               </div>
             </div>
-            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex gap-3 relative z-10">
+            <div className="p-6 border-t border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/5 print:hidden flex flex-wrap gap-3 relative z-10">
+               <button 
+                 onClick={() => {
+                   navigator.clipboard.writeText(getVoucherPortalUrl(selectedVoucherForPrint));
+                   toast.success("Lien direct du portail avec code pré-rempli copié !");
+                 }}
+                 className="flex-1 min-w-[130px] bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 dark:bg-[#0f172a] dark:hover:bg-slate-800 dark:text-slate-200 dark:border-white/10 font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
+               >
+                 <Copy size={16} /> Copier Lien
+               </button>
                <button 
                  onClick={() => window.print()}
-                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                 className="flex-1 min-w-[130px] bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
                >
-                 <QrCode size={18} /> Imprimer
+                 <Printer size={17} /> Imprimer
                </button>
                <button 
                  onClick={async () => {
@@ -5576,9 +5926,9 @@ export default function Dashboard() {
                      console.error("Failed to generate PDF", err);
                    }
                  }}
-                 className="flex-1 bg-white hover:bg-slate-50 text-indigo-600 border border-indigo-200 dark:bg-[#0f172a] dark:hover:bg-slate-800 dark:text-indigo-400 dark:border-indigo-500/30 font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                 className="flex-1 min-w-[110px] bg-white hover:bg-slate-50 text-indigo-600 border border-indigo-200 dark:bg-[#0f172a] dark:hover:bg-slate-800 dark:text-indigo-400 dark:border-indigo-500/30 font-semibold py-3 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 text-sm"
                >
-                 <Download size={18} /> PDF
+                 <Download size={17} /> PDF
                </button>
             </div>
           </div>
@@ -5587,58 +5937,101 @@ export default function Dashboard() {
 
       {/* Voucher Generation Modal */}
       {showVoucherModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl">
-            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5 top-rounded-3xl">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                Générer des codes d'accès
-              </h3>
-              <button onClick={() => setShowVoucherModal(false)} className="text-slate-400 hover:text-slate-500">
-                <X size={24} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white dark:bg-[#050614] rounded-3xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-white/10 shadow-xl my-8">
+            <div className="p-6 border-b border-slate-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-white/5">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                  Générer des codes d'accès
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Codes cryptographiques à usage unique limités dans le temps
+                </p>
+              </div>
+              <button onClick={() => setShowVoucherModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1">
+                <X size={22} />
               </button>
             </div>
             <form onSubmit={handleGenerateVouchers} className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Préfixe (optionnel)</label>
-                <input 
-                  type="text" 
-                  value={voucherConfig.prefix}
-                  onChange={e => setVoucherConfig({...voucherConfig, prefix: e.target.value})}
-                  maxLength={6}
-                  placeholder="ex: VIP"
-                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none uppercase" 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Nombre de codes</label>
-                <input required type="number" 
-                  value={voucherConfig.quantity}
-                  onChange={e => setVoucherConfig({...voucherConfig, quantity: Number(e.target.value)})}
-                  min="1" max="100" 
-                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Durée de validité</label>
-                <select required 
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Durée du pass Wi-Fi
+                </label>
+                <div className="grid grid-cols-4 gap-2 mb-2.5">
+                  {[
+                    { key: '30m', label: '30 min' },
+                    { key: '1h', label: '1 heure' },
+                    { key: '2h', label: '2 heures' },
+                    { key: '24h', label: '24 heures' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      onClick={() => setVoucherConfig({ ...voucherConfig, duration: preset.key })}
+                      className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-colors ${
+                        voucherConfig.duration === preset.key
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  required
                   value={voucherConfig.duration}
-                  onChange={e => setVoucherConfig({...voucherConfig, duration: e.target.value})}
-                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  onChange={e => setVoucherConfig({ ...voucherConfig, duration: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                 >
-                  <option value="1 heure">1 heure</option>
-                  <option value="2 heures">2 heures</option>
-                  <option value="24 heures">24 heures</option>
-                  <option value="1 semaine">1 semaine</option>
-                  <option value="1 mois">1 mois</option>
+                  <option value="30m">Pass 30 minutes (30 min)</option>
+                  <option value="1h">Pass 1 heure (60 min)</option>
+                  <option value="2h">Pass 2 heures (120 min)</option>
+                  <option value="4h">Pass 4 heures (240 min)</option>
+                  <option value="8h">Pass 8 heures (480 min)</option>
+                  <option value="24h">Pass 24 heures (1 jour)</option>
+                  <option value="7d">Pass 7 jours (1 semaine)</option>
+                  <option value="30d">Pass 30 jours (1 mois)</option>
                 </select>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Préfixe (optionnel)
+                  </label>
+                  <input 
+                    type="text" 
+                    value={voucherConfig.prefix}
+                    onChange={e => setVoucherConfig({ ...voucherConfig, prefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) })}
+                    maxLength={6}
+                    placeholder="ex: PASS1H"
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none uppercase" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Nombre de codes
+                  </label>
+                  <input
+                    required
+                    type="number" 
+                    value={voucherConfig.quantity}
+                    onChange={e => setVoucherConfig({ ...voucherConfig, quantity: Number(e.target.value) })}
+                    min="1"
+                    max="100" 
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Limite Vitesse</label>
                   <select 
                     value={voucherConfig.speedLimit}
-                    onChange={e => setVoucherConfig({...voucherConfig, speedLimit: e.target.value})}
-                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    onChange={e => setVoucherConfig({ ...voucherConfig, speedLimit: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Illimitée</option>
                     <option value="5M/5M">5 Mbps</option>
@@ -5651,8 +6044,8 @@ export default function Dashboard() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Quota Données</label>
                   <select 
                     value={voucherConfig.dataLimit}
-                    onChange={e => setVoucherConfig({...voucherConfig, dataLimit: e.target.value})}
-                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    onChange={e => setVoucherConfig({ ...voucherConfig, dataLimit: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                   >
                     <option value="">Illimité</option>
                     <option value="500M">500 Mo</option>
@@ -5662,25 +6055,70 @@ export default function Dashboard() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Établissement (Optionnel)</label>
-                <select required 
-                  value={voucherConfig.locationId}
-                  onChange={e => setVoucherConfig({...voucherConfig, locationId: e.target.value})}
-                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                >
-                  <option value="all">Tous les établissements</option>
-                  {locations.map(loc => (
-                    <option key={loc.id} value={loc.id}>{loc.name}</option>
-                  ))}
-                </select>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Établissement autorisé
+                  </label>
+                  <select
+                    required 
+                    value={voucherConfig.locationId}
+                    onChange={e => setVoucherConfig({ ...voucherConfig, locationId: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="all">Tous les établissements</option>
+                    {locations.map(loc => (
+                      <option key={loc.id} value={loc.id}>{loc.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Validité avant activation
+                  </label>
+                  <select
+                    value={voucherConfig.expiresInDays}
+                    onChange={e => setVoucherConfig({ ...voucherConfig, expiresInDays: Number(e.target.value) })}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value={0}>Sans date limite</option>
+                    <option value={1}>24 heures</option>
+                    <option value={3}>3 jours</option>
+                    <option value={7}>7 jours</option>
+                    <option value={30}>30 jours</option>
+                  </select>
+                </div>
               </div>
-              <div className="pt-4 flex gap-3">
-                <button type="button" onClick={() => setShowVoucherModal(false)} className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Note interne / Référence (optionnel)
+                </label>
+                <input
+                  type="text"
+                  value={voucherConfig.note}
+                  onChange={e => setVoucherConfig({ ...voucherConfig, note: e.target.value })}
+                  maxLength={80}
+                  placeholder="ex: Chambre 204, Client VIP, Séminaire..."
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-3 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowVoucherModal(false)}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 font-medium text-sm hover:bg-slate-50 dark:hover:bg-white/5 transition-colors"
+                >
                   Annuler
                 </button>
-                <button type="submit" disabled={isGeneratingVouchers} className="flex-1 py-2 rounded-xl bg-indigo-500 text-white font-medium hover:bg-indigo-600 transition-colors shadow-lg shadow-indigo-500/20 disabled:opacity-50">
-                  {isGeneratingVouchers ? 'Génération...' : 'Générer'}
+                <button
+                  type="submit"
+                  disabled={isGeneratingVouchers}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 text-white font-medium text-sm hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                >
+                  {isGeneratingVouchers ? 'Génération...' : `Générer ${voucherConfig.quantity > 1 ? `${voucherConfig.quantity} codes` : 'le code'}`}
                 </button>
               </div>
             </form>
@@ -7091,14 +7529,14 @@ export default function Dashboard() {
         receipt={selectedTransactionForReceipt}
       />
 
-      {/* Subscription Checkout Modal (Multi-Gateway: Stripe, PayPal, Crypto Solana) */}
+      {/* Subscription Checkout Modal (Multi-Gateway: PayPal, Crypto Solana/USDC, Stripe) */}
       <SubscriptionCheckoutModal
         isOpen={showSubscriptionModal}
         onClose={() => setShowSubscriptionModal(false)}
         user={user}
         initialGateway={subscriptionGatewayModalChoice}
-        onSuccess={async (gateway, priceId) => {
-          await handleActivatePlatformSubscription(gateway, priceId);
+        onSuccess={async (gateway, priceId, metadata) => {
+          await handleActivatePlatformSubscription(gateway, priceId, metadata);
         }}
       />
 

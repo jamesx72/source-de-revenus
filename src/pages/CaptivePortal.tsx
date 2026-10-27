@@ -11,7 +11,13 @@ import { GoogleAuthProvider, FacebookAuthProvider, signInWithPopup } from 'fireb
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { QRCodeSVG } from 'qrcode.react';
-import { getStoredGatewaysConfig, PaymentGatewaysConfig } from '../components/PaymentGatewaysSettings';
+import { 
+  getStoredGatewaysConfig, 
+  sanitizeGatewaysConfig, 
+  isValidSolanaAddress,
+  VALID_DEMO_SOLANA_ADDRESS,
+  PaymentGatewaysConfig 
+} from '../components/PaymentGatewaysSettings';
 import { ReceiptModal } from '../components/ReceiptModal';
 import { downloadReceiptPdf } from '../utils/generateReceiptPdf';
 import { WifiReceipt } from '../types';
@@ -209,15 +215,103 @@ export default function CaptivePortal() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [portalPaymentGateway, setPortalPaymentGateway] = useState<'card' | 'paypal' | 'solana'>('card');
-  const [portalPaymentMethodUsed, setPortalPaymentMethodUsed] = useState<string>('Carte Bancaire (Stripe)');
-  const [portalGatewaysConfig] = useState<PaymentGatewaysConfig>(getStoredGatewaysConfig);
+  const [portalPaymentGateway, setPortalPaymentGateway] = useState<'card' | 'paypal' | 'solana'>('paypal');
+  const [portalPaymentMethodUsed, setPortalPaymentMethodUsed] = useState<string>('PayPal Express');
+  const [portalGatewaysConfig, setPortalGatewaysConfig] = useState<PaymentGatewaysConfig>(getStoredGatewaysConfig);
+  const [stripeAvailable, setStripeAvailable] = useState<boolean>(Boolean((import.meta as any).env?.VITE_STRIPE_PUBLIC_KEY));
+  const [stripeInitError, setStripeInitError] = useState<string | null>(null);
+  const [selectedCryptoToken, setSelectedCryptoToken] = useState<'SOL' | 'USDC'>('SOL');
+  const [cryptoTxSignature, setCryptoTxSignature] = useState<string>('');
   const [solanaCopied, setSolanaCopied] = useState(false);
+  const [amountCopied, setAmountCopied] = useState(false);
 
-  const handleDirectPortalPaymentSuccess = async (method: string, gatewayKey?: string) => {
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [maxTime, setMaxTime] = useState<number>(0);
+  const [hasShown5MinWarning, setHasShown5MinWarning] = useState(false);
+  const [hasShown1MinWarning, setHasShown1MinWarning] = useState(false);
+  const [showExpiryWarning, setShowExpiryWarning] = useState(false);
+  const [showExpiredModal, setShowExpiredModal] = useState(false);
+
+  const generateSecurePortalCode = () => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const randomBytes = new Uint32Array(8);
+    window.crypto.getRandomValues(randomBytes);
+    let out = '';
+    for (let i = 0; i < 8; i++) {
+      out += alphabet[randomBytes[i] % alphabet.length];
+    }
+    return out;
+  };
+
+  const handleDirectPortalPaymentSuccess = async (
+    method: string,
+    gatewayKey: 'paypal' | 'solana',
+    extra?: { cryptoAmount?: string; token?: 'SOL' | 'USDC' }
+  ) => {
     setIsProcessingPayment(true);
     try {
-      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const passPrice = purchasedPass?.price ?? (paymentConfig.price1h || 2);
+      const passName = purchasedPass?.name || 'Pass Wi-Fi';
+      const durationMinutes = purchasedPass?.duration || selectedDuration || 120;
+      const currencyUpper = (paymentConfig.currency || 'eur').toUpperCase();
+
+      let paymentRef = '';
+
+      if (gatewayKey === 'paypal') {
+        const createRes = await fetch('/api/paypal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: passPrice.toFixed(2),
+            currency: currencyUpper,
+            clientId: portalGatewaysConfig.paypalClientId,
+            merchantEmail: portalGatewaysConfig.paypalMerchantEmail,
+            mode: portalGatewaysConfig.paypalMode || 'sandbox',
+            description: `${locationName} - ${passName}`,
+          }),
+        });
+        const createData = await createRes.json();
+        if (!createRes.ok) {
+          throw new Error(createData.error || "Impossible d'initialiser le paiement PayPal.");
+        }
+
+        const capRes = await fetch('/api/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: createData.orderId,
+            clientId: portalGatewaysConfig.paypalClientId,
+            mode: portalGatewaysConfig.paypalMode || 'sandbox',
+          }),
+        });
+        const capData = await capRes.json();
+        if (!capRes.ok) {
+          throw new Error(capData.error || 'La confirmation PayPal a échoué.');
+        }
+        paymentRef = capData.orderId || createData.orderId || '';
+      } else if (gatewayKey === 'solana') {
+        const safeWallet = isValidSolanaAddress(portalGatewaysConfig.solanaWalletAddress)
+          ? portalGatewaysConfig.solanaWalletAddress
+          : VALID_DEMO_SOLANA_ADDRESS;
+        const verifyRes = await fetch('/api/crypto/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletAddress: safeWallet,
+            amount: extra?.cryptoAmount || '0.02',
+            token: extra?.token || selectedCryptoToken,
+            network: portalGatewaysConfig.solanaNetwork || 'mainnet',
+            txHash: cryptoTxSignature.trim() || undefined,
+          }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyRes.ok) {
+          throw new Error(verifyData.error || 'Vérification du paiement Crypto refusée.');
+        }
+        paymentRef = verifyData.reference || '';
+      }
+
+      const code = generateSecurePortalCode();
       setPaymentCode(code);
       setPortalPaymentMethodUsed(method);
 
@@ -234,27 +328,83 @@ export default function CaptivePortal() {
         else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
         else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
 
-        await addDoc(collection(db, 'connections'), {
-          locationId,
+        const safeLocId = locationId || 'default';
+        const nowIso = new Date().toISOString();
+
+        // Record transaction for Admin Dashboard revenue & analytics
+        await addDoc(collection(db, 'transactions'), {
+          locationId: safeLocId,
           locationName: locationName || 'WiFiCash Hotspot',
-          userId: locationOwnerId,
+          userId: locationOwnerId || null,
+          amount: passPrice,
+          currency: currencyUpper,
+          cryptoAmount: extra?.cryptoAmount ? parseFloat(extra.cryptoAmount) : null,
+          cryptoToken: gatewayKey === 'solana' ? (extra?.token || selectedCryptoToken) : null,
+          status: 'paid',
+          paymentMethod: method,
+          gateway: gatewayKey,
+          paymentReference: paymentRef || null,
+          passName,
+          duration: durationMinutes,
+          voucherCode: code,
+          discountCode: appliedPromo?.code || null,
+          createdAt: nowIso,
+        });
+
+        // Record active connection
+        await addDoc(collection(db, 'connections'), {
+          locationId: safeLocId,
+          locationName: locationName || 'WiFiCash Hotspot',
+          userId: locationOwnerId || null,
           device: deviceType,
           os,
-          duration: selectedDuration || 120,
+          duration: durationMinutes,
           connectedAt: serverTimestamp(),
           status: 'Connecté',
           paymentStatus: 'paid',
           paymentMethod: method,
+          paymentReference: paymentRef || null,
           code
         });
       } catch (e) {
-        console.warn("Connection log warning:", e);
+        console.warn("Firestore payment/connection log warning:", e);
+      }
+
+      // Initialize session countdown timer & localStorage persistence
+      const totalSec = durationMinutes * 60;
+      setTimeLeft(totalSec);
+      setMaxTime(totalSec);
+      setHasShown5MinWarning(false);
+      setHasShown1MinWarning(false);
+      setShowExpiryWarning(false);
+      setShowExpiredModal(false);
+
+      const storageKey = `wificash_session_${locationId || 'default'}`;
+      localStorage.setItem(storageKey, JSON.stringify({
+        expiresAt: Date.now() + totalSec * 1000,
+        maxTime: totalSec,
+        startedAt: Date.now(),
+        voucherCode: code,
+        durationMinutes
+      }));
+
+      // Authorize UniFi client if hardware MAC parameters present
+      if (!isDemo) {
+        const unifiId = searchParams.get('id');
+        const unifiAp = searchParams.get('ap');
+        if (unifiId && locationId) {
+          fetch('/api/router/unifi/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mac: unifiId, ap: unifiAp, locationId, minutes: durationMinutes })
+          }).catch(() => {});
+        }
       }
 
       setStep('payment_success');
       toast.success(`Paiement validé via ${method} ! Accès Wi-Fi activé.`);
     } catch (err: any) {
-      toast.error("Erreur lors de la validation du paiement.");
+      toast.error(err.message || "Erreur lors de la validation du paiement.");
     } finally {
       setIsProcessingPayment(false);
     }
@@ -290,6 +440,9 @@ export default function CaptivePortal() {
         }
         if (event.data.paymentConfig) {
           setPaymentConfig(event.data.paymentConfig);
+        }
+        if (event.data.paymentGateways) {
+          setPortalGatewaysConfig(sanitizeGatewaysConfig(event.data.paymentGateways));
         }
       } else if (event.data?.type === 'TEST_AD_FLOW') {
         window.dispatchEvent(new CustomEvent('t_test_ad_flow'));
@@ -444,6 +597,9 @@ export default function CaptivePortal() {
             if (data.wifiConfig) {
               setWifiConfig(data.wifiConfig);
             }
+            if (data.paymentGateways) {
+              setPortalGatewaysConfig(sanitizeGatewaysConfig(data.paymentGateways));
+            }
           }
           setIsLoading(false);
         }, (err) => {
@@ -463,21 +619,57 @@ export default function CaptivePortal() {
 
   const [selectedDuration, setSelectedDuration] = useState<number>(120);
 
-  const handleCheckout = async (basePriceAmount: number, passName: string, duration?: number, stripePriceId?: string) => {
+  const handleCheckout = async (basePriceAmount: number, passName: string, duration?: number, _stripePriceId?: string) => {
     setIsProcessingPayment(true);
-    if (duration) setSelectedDuration(duration);
+    const effectiveDuration = duration || 120;
+    setSelectedDuration(effectiveDuration);
+
+    // Apply promo discount accurately in cents
+    let discountedCents = basePriceAmount;
+    if (appliedPromo) {
+      if (appliedPromo.type === 'percentage') {
+        discountedCents = Math.max(0, Math.round(basePriceAmount * (1 - (appliedPromo.value / 100))));
+      } else if (appliedPromo.type === 'flat') {
+        discountedCents = Math.max(0, basePriceAmount - Math.round(appliedPromo.value * 100));
+      }
+      if (discountedCents > 0 && discountedCents < 50) {
+        discountedCents = 50;
+      }
+    }
+
     setPurchasedPass({
       name: passName,
-      price: basePriceAmount / 100,
-      duration: duration || 120,
+      price: discountedCents / 100,
+      duration: effectiveDuration,
     });
+    setCryptoTxSignature('');
+    setStripeInitError(null);
+    setClientSecret(null);
 
-    if (isDemo) {
-      setTimeout(() => {
-        setPaymentCode("DEMO-CODE-1234");
-        setStep('payment_success');
-        setIsProcessingPayment(false);
-      }, 1000);
+    const hasStripePubKey = Boolean((import.meta as any).env?.VITE_STRIPE_PUBLIC_KEY) &&
+      (import.meta as any).env?.VITE_STRIPE_PUBLIC_KEY !== 'pk_test_...';
+    const canUsePaypal = portalGatewaysConfig.paypalEnabled !== false;
+    const canUseCrypto = portalGatewaysConfig.cryptoEnabled !== false;
+    const canUseCard = portalGatewaysConfig.stripeEnabled !== false && hasStripePubKey && !isDemo;
+
+    // Pick initial gateway tab cleanly
+    if (canUsePaypal) {
+      setPortalPaymentGateway('paypal');
+    } else if (canUseCrypto) {
+      setPortalPaymentGateway('solana');
+    } else {
+      setPortalPaymentGateway('card');
+    }
+
+    // Open checkout step so guest can always pay via PayPal or Crypto
+    setStep('payment');
+
+    if (!canUseCard) {
+      setStripeAvailable(false);
+      if (!hasStripePubKey && !isDemo) {
+        setStripeInitError("Le paiement CB Stripe n'est pas configuré sur cet établissement. Réglez en 1 clic via PayPal ou Crypto.");
+      }
+      setIsProcessingPayment(false);
       return;
     }
 
@@ -488,7 +680,7 @@ export default function CaptivePortal() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-           priceAmount: basePriceAmount, 
+           priceAmount: discountedCents, 
            currency: paymentConfig.currency || 'eur',
            passName, 
            locationId, 
@@ -500,13 +692,25 @@ export default function CaptivePortal() {
       const data = await res.json();
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
-        setStep('payment');
+        setStripeAvailable(true);
       } else {
-        toast.error(data.error || t('portal.payment_session_error'));
+        setStripeAvailable(false);
+        setStripeInitError(data.error || "Stripe CB indisponible. Utilisez PayPal ou Crypto.");
+        if (canUsePaypal) {
+          setPortalPaymentGateway('paypal');
+        } else if (canUseCrypto) {
+          setPortalPaymentGateway('solana');
+        }
       }
     } catch (err) {
-      console.error(err);
-      toast.error(t('portal.error_occurred'));
+      console.warn("Stripe intent fallback to PayPal/Crypto:", err);
+      setStripeAvailable(false);
+      setStripeInitError("Serveur Stripe indisponible. Veuillez régler via PayPal ou Crypto.");
+      if (canUsePaypal) {
+        setPortalPaymentGateway('paypal');
+      } else if (canUseCrypto) {
+        setPortalPaymentGateway('solana');
+      }
     } finally {
       setIsProcessingPayment(false);
     }
@@ -546,8 +750,8 @@ export default function CaptivePortal() {
   };
 
   const handleRedeemVoucher = async (codeToUse?: string) => {
-    const code = (codeToUse || voucherCodeInput).trim().toUpperCase();
-    if (!code) {
+    const cleanCode = (codeToUse || voucherCodeInput).trim().toUpperCase();
+    if (!cleanCode) {
       setVoucherRedeemError("Veuillez saisir votre code voucher.");
       toast.error("Veuillez saisir votre code voucher.");
       return;
@@ -557,33 +761,129 @@ export default function CaptivePortal() {
     setVoucherRedeemError('');
 
     try {
-      const res = await fetch('/api/redeem-voucher', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          locationId: locationId || 'all',
-          clientMac: 'guest-browser-client',
-          clientDevice: navigator.userAgent.includes('Mobile') ? 'Smartphone' : 'Ordinateur'
-        })
-      });
+      const { collection, query, where, getDocs, runTransaction, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const ua = navigator.userAgent;
+      let os = "Inconnu";
+      let deviceType = "Appareil";
+      if (ua.includes("Win")) { os = "Windows"; deviceType = "PC"; }
+      else if (ua.includes("Mac")) { os = "macOS"; deviceType = "Mac"; }
+      else if (ua.includes("Linux")) { os = "Linux"; deviceType = "PC"; }
+      if (ua.includes("iPhone")) { os = "iOS"; deviceType = "iPhone"; }
+      else if (ua.includes("iPad")) { os = "iPadOS"; deviceType = "iPad"; }
+      else if (ua.includes("Android")) { os = "Android"; deviceType = "Mobile Android"; }
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Code voucher invalide ou déjà utilisé.");
+      const vouchersRef = collection(db, 'vouchers');
+      const q = query(vouchersRef, where('code', '==', cleanCode));
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        throw new Error("Code voucher introuvable ou invalide.");
       }
 
-      const durationMin = Number(data.durationMinutes) || 60;
-      const totalSec = durationMin * 60;
-      const passTitle = data.voucher?.duration || formatPassDuration(durationMin);
+      const targetDocRef = snapshot.docs[0].ref;
+      const nowIso = new Date().toISOString();
+
+      const redeemedResult = await runTransaction(db, async (transaction) => {
+        const freshSnap = await transaction.get(targetDocRef);
+        if (!freshSnap.exists()) {
+          throw new Error("Code voucher introuvable.");
+        }
+        const voucher = freshSnap.data() as any;
+
+        if (voucher.status === 'used') {
+          const usedDate = voucher.usedAt ? new Date(voucher.usedAt).toLocaleString('fr-FR') : '';
+          throw new Error(`Ce voucher a déjà été utilisé${usedDate ? ' le ' + usedDate : ''}.`);
+        }
+        if (voucher.status === 'revoked') {
+          throw new Error("Ce voucher a été révoqué par l'administrateur.");
+        }
+        if (voucher.status === 'expired') {
+          throw new Error("Ce voucher a expiré.");
+        }
+
+        if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() < Date.now()) {
+          transaction.update(targetDocRef, { status: 'expired', updatedAt: nowIso });
+          throw new Error("Ce voucher a dépassé sa date limite de validité.");
+        }
+
+        if (voucher.locationId && voucher.locationId !== 'all' && locationId && voucher.locationId !== locationId) {
+          throw new Error("Ce voucher n'est pas utilisable dans cet établissement.");
+        }
+
+        // Compute duration in minutes (default 60 min = 1h pass)
+        let durationMinutes = 60;
+        const dStr = String(voucher.duration || '1h').toLowerCase();
+        if (voucher.durationMinutes && Number(voucher.durationMinutes) > 0) {
+          durationMinutes = Number(voucher.durationMinutes);
+        } else if (dStr.includes('30m') || dStr.includes('30 min')) {
+          durationMinutes = 30;
+        } else if (dStr === '1h' || dStr.includes('1 heure') || dStr === '60') {
+          durationMinutes = 60;
+        } else if (dStr === '2h' || dStr.includes('2 heure') || dStr === '120') {
+          durationMinutes = 120;
+        } else if (dStr === '4h' || dStr.includes('4 heure') || dStr === '240') {
+          durationMinutes = 240;
+        } else if (dStr === '8h' || dStr.includes('8 heure') || dStr === '480') {
+          durationMinutes = 480;
+        } else if (dStr === '24h' || dStr.includes('jour') || dStr === '1440') {
+          durationMinutes = 1440;
+        } else if (dStr === '7d' || dStr.includes('semaine') || dStr.includes('7 jour') || dStr === '10080') {
+          durationMinutes = 10080;
+        } else if (dStr === '30d' || dStr.includes('mois') || dStr.includes('30 jour') || dStr === '43200') {
+          durationMinutes = 43200;
+        } else {
+          const parsed = parseInt(dStr, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            durationMinutes = parsed;
+          }
+        }
+
+        transaction.update(targetDocRef, {
+          status: 'used',
+          usedAt: nowIso,
+          usedByMac: searchParams.get('id') || searchParams.get('mac') || 'guest-client',
+          usedByDevice: `${deviceType} (${os})`,
+          updatedAt: nowIso
+        });
+
+        return { voucher, durationMinutes };
+      });
+
+      const { voucher, durationMinutes } = redeemedResult;
+      const totalSec = durationMinutes * 60;
+      const passTitle = voucher.duration || formatPassDuration(durationMinutes);
+
+      // Log active connection in Firestore for real-time Admin Dashboard monitoring
+      try {
+        const effectiveLocId = (voucher.locationId && voucher.locationId !== 'all')
+          ? voucher.locationId
+          : (locationId || 'global');
+        await addDoc(collection(db, 'connections'), {
+          locationId: effectiveLocId,
+          locationName: voucher.locationName || locationName || 'WiFiCash Hotspot',
+          userId: voucher.createdBy || locationOwnerId || null,
+          device: deviceType,
+          os,
+          duration: durationMinutes,
+          connectedAt: serverTimestamp(),
+          status: 'Connecté',
+          paymentStatus: 'voucher',
+          paymentMethod: 'Code Voucher Sécurisé',
+          voucherCode: cleanCode,
+          speedLimit: voucher.speedLimit || null,
+          dataLimit: voucher.dataLimit || null
+        });
+      } catch (connErr) {
+        console.warn("Connection log notice:", connErr);
+      }
 
       setPurchasedPass({
         name: `Pass Voucher (${passTitle})`,
         price: 0,
-        duration: durationMin
+        duration: durationMinutes
       });
-      setPaymentCode(data.code);
-      setPortalPaymentMethodUsed("Code Voucher");
+      setPaymentCode(cleanCode);
+      setPortalPaymentMethodUsed("Code Voucher Sécurisé");
 
       // Set accurate ticking session countdown
       setTimeLeft(totalSec);
@@ -593,12 +893,25 @@ export default function CaptivePortal() {
         expiresAt: Date.now() + totalSec * 1000,
         maxTime: totalSec,
         startedAt: Date.now(),
-        voucherCode: data.code,
-        durationMinutes: durationMin
+        voucherCode: cleanCode,
+        durationMinutes
       }));
 
+      // Trigger MikroTik / UniFi router authorization if hardware params present
+      if (!isDemo) {
+        const unifiId = searchParams.get('id');
+        const unifiAp = searchParams.get('ap');
+        if (unifiId && locationId) {
+          fetch('/api/router/unifi/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mac: unifiId, ap: unifiAp, locationId, minutes: durationMinutes })
+          }).catch(() => {});
+        }
+      }
+
       setStep('payment_success');
-      toast.success(`Code voucher validé ! Accès Wi-Fi activé pour ${formatPassDuration(durationMin)}.`);
+      toast.success(`Code voucher validé ! Accès Wi-Fi activé pour ${formatPassDuration(durationMinutes)}.`);
     } catch (err: any) {
       console.error("Voucher redemption error:", err);
       const msg = err.message || "Erreur de validation du voucher.";
@@ -705,7 +1018,7 @@ export default function CaptivePortal() {
       }
     } catch (error) {
       console.error(`${providerName} login error:`, error);
-      alert(`Erreur de connexion avec ${providerName}`);
+      toast.error(`Erreur de connexion avec ${providerName}`);
     }
   };
 
@@ -800,12 +1113,7 @@ export default function CaptivePortal() {
     }
   };
 
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
-  const [maxTime, setMaxTime] = useState<number>(0);
-  const [hasShown5MinWarning, setHasShown5MinWarning] = useState(false);
-  const [hasShown1MinWarning, setHasShown1MinWarning] = useState(false);
-  const [showExpiryWarning, setShowExpiryWarning] = useState(false);
-  const [showExpiredModal, setShowExpiredModal] = useState(false);
+  // Session timer states are declared at top of CaptivePortal component
 
   // Load from or save to localStorage for persistent session timing across refreshes
   useEffect(() => {
@@ -1191,7 +1499,13 @@ export default function CaptivePortal() {
                           setVoucherCodeInput(e.target.value.toUpperCase());
                           setVoucherRedeemError('');
                         }}
-                        placeholder="EX: VIP-A1B2C3"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && voucherCodeInput.trim() && !isRedeemingVoucher) {
+                            e.preventDefault();
+                            handleRedeemVoucher();
+                          }
+                        }}
+                        placeholder="EX: PASS1H-K7M4P9X2"
                         className="flex-1 px-3.5 py-2.5 bg-white dark:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none uppercase font-mono tracking-wider"
                       />
                       <button 
@@ -1666,54 +1980,96 @@ export default function CaptivePortal() {
                 </div>
 
                 {/* Gateway Switcher */}
-                <div className="px-4 pt-3 pb-1 border-b border-slate-200 dark:border-white/10 bg-white/20 dark:bg-black/10 flex gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setPortalPaymentGateway('card')}
-                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                      portalPaymentGateway === 'card'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
-                    }`}
-                  >
-                    <CreditCard size={13} />
-                    <span>Carte CB</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPortalPaymentGateway('paypal')}
-                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                      portalPaymentGateway === 'paypal'
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
-                    }`}
-                  >
-                    <DollarSign size={13} />
-                    <span>PayPal</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPortalPaymentGateway('solana')}
-                    className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                      portalPaymentGateway === 'solana'
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-white/40 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/60'
-                    }`}
-                  >
-                    <Coins size={13} />
-                    <span>Solana (SOL)</span>
-                  </button>
+                <div className="px-4 pt-3 pb-2 border-b border-slate-200 dark:border-white/10 bg-white/20 dark:bg-black/10 flex gap-1.5 shrink-0">
+                  {portalGatewaysConfig.paypalEnabled !== false && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalPaymentGateway('paypal')}
+                      className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        portalPaymentGateway === 'paypal'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-white/60 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/80'
+                      }`}
+                    >
+                      <DollarSign size={14} />
+                      <span>PayPal</span>
+                    </button>
+                  )}
+
+                  {portalGatewaysConfig.cryptoEnabled !== false && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalPaymentGateway('solana')}
+                      className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        portalPaymentGateway === 'solana'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'bg-white/60 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/80'
+                      }`}
+                    >
+                      <Coins size={14} />
+                      <span>Crypto (SOL / USDC)</span>
+                    </button>
+                  )}
+
+                  {portalGatewaysConfig.stripeEnabled !== false && (
+                    <button
+                      type="button"
+                      onClick={() => setPortalPaymentGateway('card')}
+                      className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                        portalPaymentGateway === 'card'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'bg-white/60 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-white/80'
+                      }`}
+                    >
+                      <CreditCard size={14} />
+                      <span>Carte CB</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex-1 w-full overflow-y-auto p-4 sm:p-6" id="checkout">
                   {portalPaymentGateway === 'card' && (
-                    clientSecret ? (
+                    clientSecret && stripeAvailable ? (
                       <Elements
                         stripe={stripePromise}
                         options={{ clientSecret, appearance: { theme: 'stripe' } }}
                       >
                         <CheckoutForm duration={selectedDuration} />
                       </Elements>
+                    ) : stripeInitError || !stripeAvailable ? (
+                      <div className="flex flex-col items-center justify-center text-center py-8 px-4 max-w-sm mx-auto space-y-4">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                          <AlertCircle size={26} />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                            Paiement Stripe CB non activé
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            {stripeInitError || "Utilisez PayPal (avec ou sans compte par carte) ou Crypto Solana / USDC pour activer immédiatement votre Wi-Fi."}
+                          </p>
+                        </div>
+                        <div className="w-full flex flex-col gap-2 pt-2">
+                          {portalGatewaysConfig.paypalEnabled !== false && (
+                            <button
+                              type="button"
+                              onClick={() => setPortalPaymentGateway('paypal')}
+                              className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                            >
+                              <DollarSign size={15} /> Continuer avec PayPal
+                            </button>
+                          )}
+                          {portalGatewaysConfig.cryptoEnabled !== false && (
+                            <button
+                              type="button"
+                              onClick={() => setPortalPaymentGateway('solana')}
+                              className="w-full py-3 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors"
+                            >
+                              <Coins size={15} /> Continuer avec Crypto (SOL / USDC)
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full py-12 gap-3">
                         <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
@@ -1722,111 +2078,205 @@ export default function CaptivePortal() {
                     )
                   )}
 
-                  {portalPaymentGateway === 'paypal' && (
-                    <div className="flex flex-col items-center justify-center space-y-5 py-4 max-w-sm mx-auto text-center">
-                      <div className="w-14 h-14 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-inner">
-                        <DollarSign size={32} />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Paiement Express PayPal</h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                          Réglez directement via votre compte PayPal ou sans compte par carte bancaire.
+                  {portalPaymentGateway === 'paypal' && (() => {
+                    const currSymbol = paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€';
+                    const finalAmount = (purchasedPass?.price ?? (paymentConfig.price1h || 2));
+                    return (
+                      <div className="flex flex-col items-center justify-center space-y-5 py-3 max-w-sm mx-auto text-center">
+                        <div className="w-14 h-14 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                          <DollarSign size={30} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Paiement Express PayPal</h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            Réglez en toute sécurité via votre portefeuille PayPal ou par carte bancaire sans compte.
+                          </p>
+                        </div>
+
+                        <div className="w-full bg-white dark:bg-white/5 p-4 rounded-2xl border border-slate-200 dark:border-white/10 text-left space-y-2 shadow-sm">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Forfait choisi :</span>
+                            <span className="font-semibold text-slate-900 dark:text-white">{purchasedPass?.name || 'Pass Wi-Fi'}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-slate-500">Durée d'accès :</span>
+                            <span className="font-semibold text-slate-900 dark:text-white">{formatPassDuration(purchasedPass?.duration || selectedDuration)}</span>
+                          </div>
+                          {appliedPromo && (
+                            <div className="flex justify-between text-xs text-emerald-600 dark:text-emerald-400">
+                              <span>Code promo ({appliedPromo.code}) :</span>
+                              <span className="font-semibold">Appliqué</span>
+                            </div>
+                          )}
+                          {portalGatewaysConfig.paypalMerchantEmail && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-500">Marchand :</span>
+                              <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[180px]">{portalGatewaysConfig.paypalMerchantEmail}</span>
+                            </div>
+                          )}
+                          <div className="border-t border-slate-200 dark:border-white/10 pt-2.5 flex justify-between text-sm font-bold">
+                            <span className="text-slate-900 dark:text-white">Total à payer :</span>
+                            <span className="text-blue-600 dark:text-blue-400">
+                              {finalAmount.toFixed(2)} {currSymbol}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDirectPortalPaymentSuccess('PayPal Express', 'paypal')}
+                          disabled={isProcessingPayment}
+                          className="w-full py-3.5 px-4 rounded-xl bg-[#0070ba] hover:bg-[#005ea6] disabled:opacity-60 text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
+                        >
+                          {isProcessingPayment ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          ) : (
+                            <>
+                              <DollarSign size={16} />
+                              <span>Payer {finalAmount.toFixed(2)} {currSymbol} avec PayPal</span>
+                            </>
+                          )}
+                        </button>
+
+                        <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1">
+                          <ShieldCheck size={13} className="text-emerald-500" />
+                          Protection PayPal · Activation Wi-Fi instantanée
                         </p>
                       </div>
+                    );
+                  })()}
 
-                      <div className="w-full bg-slate-100 dark:bg-white/5 p-4 rounded-2xl border border-slate-200 dark:border-white/10 text-left space-y-2">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-500">Forfait choisi :</span>
-                          <span className="font-semibold text-slate-900 dark:text-white">{purchasedPass?.name || 'Pass Wi-Fi'}</span>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-500">Durée d'accès :</span>
-                          <span className="font-semibold text-slate-900 dark:text-white">{formatPassDuration(selectedDuration)}</span>
-                        </div>
-                        <div className="border-t border-slate-200 dark:border-white/10 pt-2 flex justify-between text-sm font-bold">
-                          <span className="text-slate-900 dark:text-white">Total à payer :</span>
-                          <span className="text-blue-600 dark:text-blue-400">
-                            {(purchasedPass?.price || (paymentConfig.price1h || 2)).toFixed(2)} {paymentConfig.currency === 'usd' ? '$' : paymentConfig.currency === 'gbp' ? '£' : '€'}
-                          </span>
-                        </div>
-                      </div>
+                  {portalPaymentGateway === 'solana' && (() => {
+                    const priceEur = purchasedPass?.price ?? (paymentConfig.price1h || 2);
+                    const solRate = portalGatewaysConfig.solRateEur || 140;
+                    const solAmount = Math.max(0.001, priceEur / solRate).toFixed(4);
+                    const usdcAmount = Math.max(0.5, paymentConfig.currency === 'usd' ? priceEur : priceEur * 1.08).toFixed(2);
+                    const activeAmount = selectedCryptoToken === 'USDC' ? usdcAmount : solAmount;
+                    const safeWallet = isValidSolanaAddress(portalGatewaysConfig.solanaWalletAddress)
+                      ? portalGatewaysConfig.solanaWalletAddress
+                      : VALID_DEMO_SOLANA_ADDRESS;
+                    const usdcMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+                    const qrUri = selectedCryptoToken === 'USDC'
+                      ? `solana:${safeWallet}?amount=${activeAmount}&spl-token=${usdcMint}&label=${encodeURIComponent(locationName || 'WiFiCash')}`
+                      : `solana:${safeWallet}?amount=${activeAmount}&label=${encodeURIComponent(locationName || 'WiFiCash')}`;
 
-                      <button
-                        type="button"
-                        onClick={() => handleDirectPortalPaymentSuccess('PayPal Express', 'paypal')}
-                        disabled={isProcessingPayment}
-                        className="w-full py-3.5 px-4 rounded-xl bg-[#0070ba] hover:bg-[#005ea6] text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2"
-                      >
-                        {isProcessingPayment ? (
-                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        ) : (
-                          <>
-                            <DollarSign size={16} />
-                            <span>Payer {(purchasedPass?.price || 2).toFixed(2)}€ avec PayPal</span>
-                          </>
+                    return (
+                      <div className="flex flex-col items-center justify-center space-y-4 py-1 max-w-sm mx-auto text-center">
+                        {/* Token Switcher: SOL vs USDC */}
+                        {portalGatewaysConfig.cryptoUsdcEnabled !== false && (
+                          <div className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-white/10 border border-slate-200 dark:border-white/10">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCryptoToken('SOL')}
+                              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                selectedCryptoToken === 'SOL'
+                                  ? 'bg-purple-600 text-white shadow-sm'
+                                  : 'text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              SOL (Solana)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCryptoToken('USDC')}
+                              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                selectedCryptoToken === 'USDC'
+                                  ? 'bg-purple-600 text-white shadow-sm'
+                                  : 'text-slate-600 dark:text-slate-300'
+                              }`}
+                            >
+                              USDC (SPL)
+                            </button>
+                          </div>
                         )}
-                      </button>
-                    </div>
-                  )}
 
-                  {portalPaymentGateway === 'solana' && (
-                    <div className="flex flex-col items-center justify-center space-y-4 py-2 max-w-sm mx-auto text-center">
-                      <div className="bg-white p-3 rounded-2xl shadow-md border border-slate-200 dark:border-white/10">
-                        <QRCodeSVG 
-                          value={`solana:${portalGatewaysConfig.solanaWalletAddress}?amount=${(((purchasedPass?.price || 2) / 130)).toFixed(4)}&label=WiFiCash%20Pass`} 
-                          size={140} 
-                          level="M" 
-                        />
-                      </div>
-
-                      <div>
-                        <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-center gap-1.5">
-                          <Coins size={16} className="text-purple-500" /> Solana Pay
-                        </h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          Envoyez <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">{(((purchasedPass?.price || 2) / 130)).toFixed(4)} SOL</span> via Phantom / Solflare
-                        </p>
-                      </div>
-
-                      <div className="w-full bg-slate-100 dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/10 text-left">
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-                          <span>Adresse réceptrice SOL :</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(portalGatewaysConfig.solanaWalletAddress);
-                              setSolanaCopied(true);
-                              toast.success('Adresse Solana copiée !');
-                              setTimeout(() => setSolanaCopied(false), 2000);
-                            }}
-                            className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
-                          >
-                            {solanaCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                            Copier
-                          </button>
+                        <div className="bg-white p-3 rounded-2xl shadow-md border border-slate-200 dark:border-white/10">
+                          <QRCodeSVG value={qrUri} size={136} level="M" />
                         </div>
-                        <p className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate bg-white dark:bg-black/30 p-2 rounded-lg border border-slate-200 dark:border-white/10">
-                          {portalGatewaysConfig.solanaWalletAddress}
-                        </p>
-                      </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDirectPortalPaymentSuccess('Solana Crypto (SOL)', 'solana')}
-                        disabled={isProcessingPayment}
-                        className="w-full py-3.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
-                      >
-                        {isProcessingPayment ? (
-                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        ) : (
-                          <>
-                            <Coins size={16} />
-                            <span>Valider le transfert SOL & Se Connecter</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
+                        <div>
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-center gap-1.5">
+                            <Coins size={16} className="text-purple-500" /> Solana Pay ({portalGatewaysConfig.solanaNetwork === 'devnet' ? 'Devnet' : 'Mainnet'})
+                          </h3>
+                          <div className="flex items-center justify-center gap-1.5 mt-1">
+                            <span className="text-xs text-slate-500 dark:text-slate-400">Montant exact :</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(activeAmount);
+                                setAmountCopied(true);
+                                toast.success(`Montant (${activeAmount} ${selectedCryptoToken}) copié !`);
+                                setTimeout(() => setAmountCopied(false), 2000);
+                              }}
+                              className="text-xs font-bold text-purple-600 dark:text-purple-400 font-mono flex items-center gap-1 hover:underline"
+                            >
+                              <span>{activeAmount} {selectedCryptoToken}</span>
+                              {amountCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="w-full bg-white dark:bg-white/5 p-3 rounded-xl border border-slate-200 dark:border-white/10 text-left space-y-2 shadow-sm">
+                          <div>
+                            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                              <span>Adresse réceptrice ({selectedCryptoToken}) :</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(safeWallet);
+                                  setSolanaCopied(true);
+                                  toast.success('Adresse Solana copiée !');
+                                  setTimeout(() => setSolanaCopied(false), 2000);
+                                }}
+                                className="text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 font-semibold"
+                              >
+                                {solanaCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                                Copier
+                              </button>
+                            </div>
+                            <p className="font-mono text-[11px] text-slate-800 dark:text-slate-200 truncate bg-slate-50 dark:bg-black/30 p-2 rounded-lg border border-slate-200 dark:border-white/10">
+                              {safeWallet}
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] text-slate-500 mb-1">
+                              Signature de transaction (optionnel) :
+                            </label>
+                            <input
+                              type="text"
+                              value={cryptoTxSignature}
+                              onChange={(e) => setCryptoTxSignature(e.target.value)}
+                              placeholder="Coller le hash Solana (optionnel)"
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDirectPortalPaymentSuccess(
+                              `Crypto Solana (${selectedCryptoToken})`,
+                              'solana',
+                              { cryptoAmount: activeAmount, token: selectedCryptoToken }
+                            )
+                          }
+                          disabled={isProcessingPayment}
+                          className="w-full py-3.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-bold text-sm transition-all shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
+                        >
+                          {isProcessingPayment ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          ) : (
+                            <>
+                              <Coins size={16} />
+                              <span>Confirmer {activeAmount} {selectedCryptoToken} & Activer le Wi-Fi</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               </motion.div>
             )}
